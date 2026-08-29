@@ -1,13 +1,13 @@
 import Foundation
 
-/// AppVisitors iOS SDK — public facade. All calls are synchronous, thread-safe and never throw or crash the host app;
+/// Union iOS SDK — public facade. All calls are synchronous, thread-safe and never throw or crash the host app;
 /// invalid input is logged and dropped. Configure once, as early as possible in app launch.
 ///
 /// ```swift
-/// AppVisitors.configure(writeKey: "av_…", privacyMode: .productAnalytics)
-/// AppVisitors.track("workout_started", properties: ["plan": "strength", "minutes": 30], role: .start)
+/// Union.configure(writeKey: "av_…", privacyMode: .productAnalytics)
+/// Union.track("workout_started", properties: ["plan": "strength", "minutes": 30], role: .start)
 /// ```
-public enum AppVisitors {
+public enum Union {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var client: Client?
 

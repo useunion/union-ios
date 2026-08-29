@@ -37,7 +37,7 @@ extension UIViewController {
     @objc fileprivate func av_viewDidAppear(_ animated: Bool) {
         av_viewDidAppear(animated) // calls the original implementation (swapped)
         if AutomaticScreenTracking.shouldTrack(self) {
-            AppVisitors.screen(AutomaticScreenTracking.screenName(self))
+            Union.screen(AutomaticScreenTracking.screenName(self))
         }
     }
 }
@@ -49,7 +49,7 @@ import SwiftUI
 public extension View {
     /// Emits `$screen_view` when the view appears. The preferred way to track screens in SwiftUI apps.
     func trackScreen(_ name: String, properties: [String: PropertyValue] = [:]) -> some View {
-        onAppear { AppVisitors.screen(name, properties: properties) }
+        onAppear { Union.screen(name, properties: properties) }
     }
 }
 #endif

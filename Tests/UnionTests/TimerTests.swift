@@ -1,5 +1,5 @@
 import XCTest
-@testable import AppVisitors
+@testable import Union
 
 final class TimerTests: XCTestCase {
     /// The periodic timer must flush without any further SDK call (a cold start that only emits auto events).

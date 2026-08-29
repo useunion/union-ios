@@ -29,7 +29,7 @@ final class AppLifecycleObserver {
     private func background() {
         let app = UIApplication.shared
         var taskId = UIBackgroundTaskIdentifier.invalid
-        taskId = app.beginBackgroundTask(withName: "AppVisitors.flush") {
+        taskId = app.beginBackgroundTask(withName: "Union.flush") {
             app.endBackgroundTask(taskId)
             taskId = .invalid
         }

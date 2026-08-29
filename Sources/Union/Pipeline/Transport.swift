@@ -28,8 +28,8 @@ struct URLSessionTransport: Transport {
         var req = URLRequest(url: endpoint)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.setValue(writeKey, forHTTPHeaderField: "x-appvisitors-key")
-        req.setValue("appvisitors-ios/\(SDKInfo.version)", forHTTPHeaderField: "User-Agent")
+        req.setValue(writeKey, forHTTPHeaderField: "x-union-key")
+        req.setValue("union-ios/\(SDKInfo.version)", forHTTPHeaderField: "User-Agent")
         req.httpBody = body
         let (data, resp) = try await session.data(for: req)
         let http = resp as? HTTPURLResponse

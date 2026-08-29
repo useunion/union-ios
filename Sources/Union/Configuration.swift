@@ -53,8 +53,8 @@ public enum PropertyValue: Sendable, Equatable, Codable, ExpressibleByStringLite
 }
 
 public struct Options: Sendable {
-    /// Ingest endpoint. Defaults to the hosted AppVisitors ingest.
-    public var endpoint: URL = URL(string: "https://appvisitors-ingest.office-927.workers.dev/v1/batch")!
+    /// Ingest endpoint. Defaults to the hosted Union ingest.
+    public var endpoint: URL = URL(string: "https://union-ingest.office-927.workers.dev/v1/batch")!
     /// Overrides automatic detection (DEBUG → development, sandbox receipt → testflight, else production).
     public var environment: Environment? = nil
     /// Flush when this many events are queued.

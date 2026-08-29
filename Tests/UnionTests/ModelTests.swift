@@ -1,5 +1,5 @@
 import XCTest
-@testable import AppVisitors
+@testable import Union
 
 final class UUIDv7Tests: XCTestCase {
     func testFormatVersionAndVariant() {

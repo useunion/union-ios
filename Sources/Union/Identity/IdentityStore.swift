@@ -33,7 +33,7 @@ struct KeychainIdentityStore: IdentityStore {
     private let installKey = "install_id"
     private let userKey = "user_id"
 
-    init(service: String = "com.appvisitors.sdk") { self.service = service }
+    init(service: String = "app.union.sdk") { self.service = service }
 
     func load() -> Identity {
         Identity(installId: read(installKey), userId: read(userKey))

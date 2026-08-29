@@ -8,7 +8,7 @@ struct SDKLogger: Sendable {
     let handler: (@Sendable (LogLevel, String) -> Void)?
 
     #if canImport(os)
-    private static let osLogger = os.Logger(subsystem: "com.appvisitors.sdk", category: "AppVisitors")
+    private static let osLogger = os.Logger(subsystem: "app.union.sdk", category: "Union")
     #endif
 
     func log(_ l: LogLevel, _ message: @autoclosure () -> String) {
@@ -24,7 +24,7 @@ struct SDKLogger: Sendable {
         case .none: break
         }
         #else
-        print("[AppVisitors] \(text)")
+        print("[Union] \(text)")
         #endif
     }
 }

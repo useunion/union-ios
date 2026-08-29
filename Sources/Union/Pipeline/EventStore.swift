@@ -15,7 +15,7 @@ final class InMemoryEventStore: EventStore, @unchecked Sendable {
     func replaceAll(_ events: [Event]) throws { lock.lock(); self.events = events; lock.unlock() }
 }
 
-/// NDJSON append log in Application Support/AppVisitors/<keyHash>/queue.ndjson, excluded from backups.
+/// NDJSON append log in Application Support/Union/<keyHash>/queue.ndjson, excluded from backups.
 /// Append is O(1); the file is rewritten (compacted) only after a batch is acknowledged or evicted.
 final class FileEventStore: EventStore, @unchecked Sendable {
     let url: URL
@@ -23,7 +23,7 @@ final class FileEventStore: EventStore, @unchecked Sendable {
 
     init(directoryName: String) throws {
         let base = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-        var dir = base.appendingPathComponent("AppVisitors", isDirectory: true).appendingPathComponent(directoryName, isDirectory: true)
+        var dir = base.appendingPathComponent("Union", isDirectory: true).appendingPathComponent(directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         var values = URLResourceValues()
         values.isExcludedFromBackup = true
@@ -64,7 +64,7 @@ final class FileEventStore: EventStore, @unchecked Sendable {
 /// UserDefaults is thread-safe but not marked Sendable; the wrapper is the only holder of the reference.
 final class UserDefaultsStore: KeyValueStore, @unchecked Sendable {
     private let defaults: UserDefaults
-    init(suite: String = "com.appvisitors.sdk") { defaults = UserDefaults(suiteName: suite) ?? .standard }
+    init(suite: String = "app.union.sdk") { defaults = UserDefaults(suiteName: suite) ?? .standard }
     func string(forKey key: String) -> String? { defaults.string(forKey: key) }
     func set(_ value: String?, forKey key: String) {
         if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }

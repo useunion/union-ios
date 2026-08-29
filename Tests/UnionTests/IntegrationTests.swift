@@ -1,5 +1,5 @@
 import XCTest
-@testable import AppVisitors
+@testable import Union
 
 /// Talks to a real ingest. Skipped unless AV_INTEGRATION_WRITE_KEY is set, e.g.
 ///   AV_INTEGRATION_WRITE_KEY=av_… AV_INTEGRATION_ENDPOINT=https://…/v1/batch swift test --filter IntegrationTests
@@ -7,7 +7,7 @@ final class IntegrationTests: XCTestCase {
     func testRealIngestAcceptsBatch() async throws {
         let env = ProcessInfo.processInfo.environment
         guard let key = env["AV_INTEGRATION_WRITE_KEY"] else { throw XCTSkip("AV_INTEGRATION_WRITE_KEY not set") }
-        let endpoint = URL(string: env["AV_INTEGRATION_ENDPOINT"] ?? "https://appvisitors-ingest.office-927.workers.dev/v1/batch")!
+        let endpoint = URL(string: env["AV_INTEGRATION_ENDPOINT"] ?? "https://union-ingest.office-927.workers.dev/v1/batch")!
 
         let transport = URLSessionTransport(endpoint: endpoint)
         let p = EventPipeline(

@@ -1,5 +1,5 @@
 import Foundation
-@testable import AppVisitors
+@testable import Union
 
 final class TestClock: Clock, @unchecked Sendable {
     private let lock = NSLock()
