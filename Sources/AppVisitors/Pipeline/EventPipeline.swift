@@ -221,6 +221,7 @@ actor EventPipeline {
                 attempt = 0
                 maxEvents = Limits.batchMaxEvents
                 if rejected > 0 { logger.log(.info, "\(rejected) event(s) filtered server-side (kill switch)") }
+                logger.log(.info, "sent \(batch.count) event(s): \(batch.map(\.name).joined(separator: ", "))")
                 removeFromQueue(batch)
             case .dropEvents(let indices):
                 let bad = indices.compactMap { batch.indices.contains($0) ? batch[$0] : nil }

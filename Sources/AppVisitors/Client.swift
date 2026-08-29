@@ -12,7 +12,8 @@ final class Client: Sendable {
         logger = SDKLogger(level: options.logLevel, handler: options.logHandler)
         let device = DeviceContextProvider.current()
         let environment = options.environment ?? EnvironmentDetector.detect()
-        let keyHash = String(writeKey.hashValue.magnitude, radix: 36)
+        // Deterministic: Swift's `hashValue` is seeded per process, which would give every launch a new queue directory.
+        let keyHash = Client.stableHash(writeKey)
         let store: EventStore = (try? FileEventStore(directoryName: keyHash)) ?? InMemoryEventStore()
         let identityStore: IdentityStore
         #if canImport(Security)
@@ -41,5 +42,15 @@ final class Client: Sendable {
             if auto { AutomaticScreenTracking.install() }
         }
         #endif
+    }
+
+    /// FNV-1a 64-bit, base-36. Stable across launches and OS versions; only used to name the on-disk queue directory.
+    static func stableHash(_ text: String) -> String {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in text.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return String(hash, radix: 36)
     }
 }
