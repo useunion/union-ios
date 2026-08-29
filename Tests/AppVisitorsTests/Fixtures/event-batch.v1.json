@@ -1,0 +1,181 @@
+{
+  "$ref": "#/definitions/EventBatchV1",
+  "definitions": {
+    "EventBatchV1": {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "type": "number",
+          "const": 1
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environment": {
+          "type": "string",
+          "enum": ["development", "testflight", "production"]
+        },
+        "privacy_mode": {
+          "type": "string",
+          "enum": ["strict_anonymous", "product_analytics"]
+        },
+        "sent_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "device": {
+          "type": "object",
+          "properties": {
+            "app_version": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "app_build": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "sdk_version": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "os_name": {
+              "type": "string",
+              "const": "iOS"
+            },
+            "os_version": {
+              "type": "string",
+              "maxLength": 32
+            },
+            "device_model": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "locale": {
+              "type": "string",
+              "maxLength": 16
+            },
+            "timezone": {
+              "type": "string",
+              "maxLength": 64
+            }
+          },
+          "required": [
+            "app_version",
+            "app_build",
+            "sdk_version",
+            "os_name",
+            "os_version",
+            "device_model",
+            "locale",
+            "timezone"
+          ],
+          "additionalProperties": false
+        },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "install_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "session_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "name": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "enum": [
+                      "$first_open",
+                      "$session_start",
+                      "$session_end",
+                      "$foreground",
+                      "$background",
+                      "$screen_view",
+                      "$app_install",
+                      "$app_update",
+                      "$deep_link"
+                    ]
+                  },
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 64,
+                    "pattern": "^[a-z][a-z0-9_]*$"
+                  }
+                ]
+              },
+              "timestamp": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "screen": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "properties": {
+                "type": "object",
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "propertyNames": {
+                  "minLength": 1,
+                  "maxLength": 64
+                }
+              },
+              "role": {
+                "type": "string",
+                "enum": ["discovery", "start", "use", "success", "failure"]
+              }
+            },
+            "required": ["event_id", "session_id", "name", "timestamp"],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "contract_version",
+        "batch_id",
+        "environment",
+        "privacy_mode",
+        "sent_at",
+        "device",
+        "events"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

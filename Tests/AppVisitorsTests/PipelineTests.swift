@@ -1,0 +1,158 @@
+import XCTest
+@testable import AppVisitors
+
+final class PipelineTests: XCTestCase {
+    func testColdStartEmitsInstallAndSessionStartAndBatchConformsToSchema() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.track(name: "workout_started", properties: ["plan": "strength", "minutes": 30], role: .start, screen: "WorkoutDetail")
+        await p.flush()
+
+        XCTAssertEqual(transport.sent.count, 1)
+        let batch = transport.sent[0]
+        XCTAssertEqual(batch.events.map(\.name), ["$first_open", "$app_install", "$session_start", "workout_started"])
+        XCTAssertEqual(Set(batch.events.map(\.sessionId)).count, 1)
+        XCTAssertNotNil(batch.identity.installId)
+        XCTAssertEqual(batch.contractVersion, 1)
+
+        let validator = try MiniSchemaValidator(schema: Fixtures.schemaData())
+        let errors = try validator.validate(WireCoding.encoder.encode(batch))
+        XCTAssertEqual(errors, [], errors.joined(separator: "\n"))
+        let queued = await p.queuedEvents
+        XCTAssertTrue(queued.isEmpty, "acknowledged events leave the queue")
+    }
+
+    func testStrictAnonymousSendsEmptyIdentityAndIgnoresIdentify() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport, privacy: .strictAnonymous)
+        await p.start(hadPersistentIdentity: false)
+        await p.identify(userId: "u1")
+        await p.flush()
+        let batch = transport.sent[0]
+        XCTAssertEqual(batch.identity, .anonymous)
+        let json = String(decoding: try WireCoding.encoder.encode(batch), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"identity\":{}"), json)
+        XCTAssertFalse(json.contains("install_id"))
+    }
+
+    func testInvalidEventsAreDroppedLocallyAndNeverSent() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.track(name: "BadName", properties: [:], role: nil, screen: nil)
+        await p.track(name: "$session_start", properties: [:], role: nil, screen: nil)
+        await p.flush()
+        XCTAssertTrue(transport.sent.isEmpty)
+    }
+
+    func testPartialRejectionDropsOnlyFlaggedEventsAndRetriesRestWithSameIds() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p.track(name: "b_two", properties: [:], role: nil, screen: nil)
+        await p.track(name: "c_three", properties: [:], role: nil, screen: nil)
+        // The queue also holds the auto-emitted $session_start; the server flags b_two by its index in the batch.
+        let queued = await p.queuedEvents
+        let badIndex = queued.firstIndex { $0.name == "b_two" }!
+        transport.enqueue(.error(400, #"{"error":"invalid_batch","message":"batch rejected","details":[{"path":"events.\#(badIndex).properties.x","message":"too long"}]}"#))
+        transport.enqueue(.accepted())
+        await p.flush()
+        XCTAssertEqual(transport.sent.count, 2)
+        let first = transport.sent[0].events
+        let second = transport.sent[1].events
+        XCTAssertEqual(second.map(\.name), first.map(\.name).filter { $0 != "b_two" })
+        XCTAssertEqual(second.map(\.eventId), first.filter { $0.name != "b_two" }.map(\.eventId), "retried events keep their event_id (server dedupe)")
+        let left = await p.queuedEvents
+        XCTAssertTrue(left.isEmpty)
+    }
+
+    func testEnvelopeProblemDropsWholeBatch() async {
+        let env = #"{"error":"invalid_batch","message":"write key is bound to production"}"#
+        let transport = StubTransport([.error(400, env)])
+        let p = Fixtures.pipeline(transport: transport)
+        await p.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p.flush()
+        let queued = await p.queuedEvents
+        XCTAssertTrue(queued.isEmpty)
+    }
+
+    func testUnauthorizedStopsAndRateLimitPauses() async {
+        let t1 = StubTransport([.error(401, #"{"error":"invalid_write_key","message":"unknown"}"#)])
+        let p1 = Fixtures.pipeline(transport: t1)
+        await p1.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p1.flush()
+        let stopped = await p1.isStopped
+        XCTAssertTrue(stopped)
+
+        let clock = TestClock()
+        let t2 = StubTransport([.error(429, #"{"error":"rate_limited","message":"slow down"}"#, retryAfter: 60), .accepted()])
+        let p2 = Fixtures.pipeline(clock: clock, transport: t2)
+        await p2.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p2.flush()
+        var paused = await p2.isPaused
+        XCTAssertTrue(paused)
+        await p2.flush()
+        XCTAssertEqual(t2.sent.count, 1, "no send while paused")
+        clock.advance(61)
+        await p2.flush()
+        paused = await p2.isPaused
+        XCTAssertFalse(paused)
+        XCTAssertEqual(t2.sent.count, 2)
+    }
+
+    func testNetworkErrorKeepsQueueAndBacksOff() async {
+        let clock = TestClock()
+        let transport = StubTransport()
+        transport.failWithNetworkError = true
+        let p = Fixtures.pipeline(clock: clock, transport: transport)
+        await p.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p.flush()
+        let queued = await p.queuedEvents
+        XCTAssertTrue(queued.contains { $0.name == "a_one" }, "nothing is lost on network failure")
+        XCTAssertEqual(transport.sent.count, 1)
+        let paused = await p.isPaused
+        XCTAssertTrue(paused)
+    }
+
+    func testSessionRotatesAfterLongBackground() async {
+        let clock = TestClock()
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(clock: clock, transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        let first = await p.currentSessionId
+        await p.didEnterBackground()
+        clock.advance(31 * 60)
+        await p.willEnterForeground()
+        let second = await p.currentSessionId
+        XCTAssertNotEqual(first, second)
+        await p.flush()
+        let names = transport.sent.flatMap { $0.events.map(\.name) }
+        XCTAssertTrue(names.contains("$background"))
+        XCTAssertTrue(names.contains("$session_end"))
+        XCTAssertEqual(names.filter { $0 == "$session_start" }.count, 2)
+    }
+
+    func testOptOutWipesAndStops() async {
+        let transport = StubTransport()
+        let kv = InMemoryKeyValueStore()
+        let p = Fixtures.pipeline(transport: transport, kv: kv)
+        await p.start(hadPersistentIdentity: false)
+        await p.optOut()
+        await p.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p.flush()
+        XCTAssertTrue(transport.sent.isEmpty)
+        XCTAssertEqual(kv.string(forKey: "opt_out"), "1")
+        let id = await p.currentIdentity
+        XCTAssertEqual(id, .anonymous)
+    }
+
+    func testBatcherRespectsLimits() {
+        let big = Event(eventId: UUIDv7.generate(), sessionId: UUIDv7.generate(), name: "x", timestamp: 0, screen: nil, properties: ["p": .string(String(repeating: "a", count: 250))], role: nil)
+        let queue = Array(repeating: big, count: 1500)
+        let batch = Batcher.nextBatch(from: queue)
+        XCTAssertLessThanOrEqual(batch.count, 100)
+        let bytes = try! WireCoding.encoder.encode(batch).count
+        XCTAssertLessThanOrEqual(bytes, Limits.batchMaxBytes)
+        XCTAssertEqual(Batcher.nextBatch(from: [big], maxBytes: 10).count, 1, "oversized single event is still sent alone")
+    }
+}
