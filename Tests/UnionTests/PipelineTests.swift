@@ -132,6 +132,37 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(names.filter { $0 == "$session_start" }.count, 2)
     }
 
+    /// Host apps call reset() on a cold launch before their own auth restores (Hook did); rotating there
+    /// split the launch into two sessions, one holding $app_update and none of the screens.
+    func testResetWithoutUserIdKeepsTheSession() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        let first = await p.currentSessionId
+        await p.reset()
+        let after = await p.currentSessionId
+        XCTAssertEqual(first, after)
+        await p.flush()
+        let names = transport.sent.flatMap { $0.events.map(\.name) }
+        XCTAssertFalse(names.contains("$session_end"))
+        XCTAssertEqual(names.filter { $0 == "$session_start" }.count, 1)
+    }
+
+    func testResetAfterIdentifyRotatesTheSession() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        let first = await p.currentSessionId
+        await p.identify(userId: "u-1")
+        await p.reset()
+        let after = await p.currentSessionId
+        XCTAssertNotEqual(first, after)
+        await p.flush()
+        let names = transport.sent.flatMap { $0.events.map(\.name) }
+        XCTAssertTrue(names.contains("$session_end"))
+        XCTAssertEqual(names.filter { $0 == "$session_start" }.count, 2)
+    }
+
     func testOptOutWipesAndStops() async {
         let transport = StubTransport()
         let kv = InMemoryKeyValueStore()

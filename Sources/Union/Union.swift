@@ -40,7 +40,8 @@ public enum Union {
         Task { await p.identify(userId: userId) }
     }
 
-    /// Logout: forgets the user id and starts a new session. The install id is kept.
+    /// Logout: forgets the user id and starts a new session. The install id is kept. Safe to call when nobody is
+    /// signed in — it does nothing then, so a cold launch that resets before auth restores keeps one session.
     public static func reset() {
         guard let p = shared?.pipeline else { return }
         Task { await p.reset() }

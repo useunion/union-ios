@@ -164,7 +164,11 @@ actor EventPipeline {
     }
 
     /// Logout: forget user id and rotate the session; the install id stays (it identifies the device, not the person).
+    /// With no user id there is nobody to forget, so this is a no-op: host apps routinely call reset() on a cold
+    /// launch before their own auth has restored, and rotating there would split the first session in two. In
+    /// strict_anonymous there is never a user id and the session *is* the identity, so it always rotates.
     func reset() {
+        guard identity.userId != nil || config.privacyMode == .strictAnonymous else { return }
         identity.userId = nil
         identityStore.save(identity)
         if case .rotated(let ended, let started) = session.rotate() {
