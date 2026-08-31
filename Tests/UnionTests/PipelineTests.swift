@@ -146,6 +146,87 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(id, .anonymous)
     }
 
+    func testScreenViewCarriesTheScreenNameAndItsProperties() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.screen(name: "WorkoutDetail", properties: ["plan": .string("strength")])
+        await p.screen(name: String(repeating: "x", count: Limits.screenNameMaxLength + 1), properties: [:])
+        await p.flush()
+
+        let views = transport.sent[0].events.filter { $0.name == "$screen_view" }
+        XCTAssertEqual(views.count, 1, "a screen name over the limit is dropped, not truncated")
+        XCTAssertEqual(views[0].screen, "WorkoutDetail")
+        XCTAssertEqual(views[0].properties?["plan"], .string("strength"))
+    }
+
+    func testDeepLinkReportsSchemeHostAndPathButNeverTheQuery() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.deepLink(URL(string: "hook://open/workout/42?token=secret&email=a@b.com#frag")!)
+        await p.flush()
+
+        let event = transport.sent[0].events.first { $0.name == "$deep_link" }
+        XCTAssertEqual(event?.properties?["url_scheme"], .string("hook"))
+        XCTAssertEqual(event?.properties?["host"], .string("open"))
+        XCTAssertEqual(event?.properties?["path"], .string("/workout/42"))
+        let json = String(decoding: try! WireCoding.encoder.encode(transport.sent[0]), as: UTF8.self)
+        XCTAssertFalse(json.contains("secret"), "query strings are PII and never leave the device")
+        XCTAssertFalse(json.contains("frag"))
+    }
+
+    func testForegroundWithinTheWindowContinuesTheSession() async {
+        let clock = TestClock()
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(clock: clock, transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        let session = await p.currentSessionId
+        await p.didEnterBackground()
+        clock.advance(60)
+        await p.willEnterForeground()
+        await p.flush()
+
+        let same = await p.currentSessionId
+        XCTAssertEqual(same, session, "a minute in the background is not a new session")
+        let names = transport.sent.flatMap { $0.events.map(\.name) }
+        XCTAssertEqual(names.filter { $0 == "$foreground" }.count, 1)
+        XCTAssertEqual(names.filter { $0 == "$session_start" }.count, 1)
+        XCTAssertFalse(names.contains("$session_end"))
+    }
+
+    func testTooLargeSplitsTheBatchInsteadOfDroppingIt() async {
+        let transport = StubTransport([.error(413, #"{"error":"batch_too_large","message":"256 KB max"}"#)])
+        let p = Fixtures.pipeline(transport: transport)
+        for i in 0..<4 { await p.track(name: "e_\(i)", properties: [:], role: nil, screen: nil) }
+        await p.flush()
+
+        XCTAssertEqual(transport.sent.count, 2, "the rejected batch is resent, halved, not dropped")
+        XCTAssertLessThan(transport.sent[1].events.count, Limits.batchMaxEvents)
+        let queued = await p.queuedEvents
+        XCTAssertTrue(queued.isEmpty)
+    }
+
+    func testDisabledProjectPausesForAnHourAndKeepsTheQueue() async {
+        let clock = TestClock()
+        let transport = StubTransport([.error(403, #"{"error":"project_disabled","message":"disabled"}"#), .accepted()])
+        let p = Fixtures.pipeline(clock: clock, transport: transport)
+        await p.track(name: "a_one", properties: [:], role: nil, screen: nil)
+        await p.flush()
+
+        var paused = await p.isPaused
+        XCTAssertTrue(paused)
+        var queued = await p.queuedEvents
+        XCTAssertTrue(queued.contains { $0.name == "a_one" }, "nothing is lost while the project is disabled")
+        clock.advance(3600 + 1)
+        paused = await p.isPaused
+        XCTAssertFalse(paused)
+        await p.flush()
+        XCTAssertEqual(transport.sent.count, 2)
+        queued = await p.queuedEvents
+        XCTAssertTrue(queued.isEmpty)
+    }
+
     func testBatcherRespectsLimits() {
         let big = Event(eventId: UUIDv7.generate(), sessionId: UUIDv7.generate(), name: "x", timestamp: 0, screen: nil, properties: ["p": .string(String(repeating: "a", count: 250))], role: nil)
         let queue = Array(repeating: big, count: 1500)

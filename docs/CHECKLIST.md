@@ -23,7 +23,10 @@ Nazwa musi pochodzić z `AutoEventName`. Klient nigdy nie może wysłać `$…` 
 | `$deep_link` | `Union.handleDeepLink(url)` | `url_scheme`, `host`, `path` — **nigdy** query ani fragment (PII) | [x] |
 
 Reguły, których nie łamiemy:
-- Kolejność w paczce jest chronologiczna: `$session_end` starej sesji zawsze przed `$session_start` nowej.
+- Kolejność w paczce jest chronologiczna, z jednym udokumentowanym wyjątkiem: `$session_end` starej sesji zawsze
+  przed `$session_start` nowej, ale przy zimnym starcie `$first_open`/`$app_install`/`$app_update` idą **przed**
+  `$session_start` swojej sesji (mają już jej `session_id`) — to celowe i zabetonowane testem
+  `testColdStartEmitsInstallAndSessionStartAndBatchConformsToSchema`.
 - Każdy event ma `session_id` żywej sesji; eventy domykające dostają `session_id` sesji, którą domykają.
 - `event_id` i `session_id` to UUIDv7 z SDK; retry zachowuje `event_id` (serwer deduplikuje).
 - Timeout sesji (30 min) liczy SDK **i** serwer — obie strony muszą dawać ten sam wynik.
@@ -47,6 +50,10 @@ Reguły, których nie łamiemy:
 
 ## 4. Dostarczanie
 
+- [x] host: `https://in.useunion.dev/v1/batch` — ten sam, co `custom_domain` w `apps/ingest/wrangler.jsonc` w repo
+  `Union`. Ten adres jedzie w każdej wydanej binarce: zmiana odcina od ingestu wszystkie apki już w App Store,
+  a SDK nie krzyczy głośniej niż `warning`, więc awaria jest cicha. Zmieniasz host tylko razem z ingestem.
+- [x] nagłówek klucza to `x-union-key` (nie `Authorization: Bearer`)
 - [x] kolejka NDJSON w Application Support, wykluczona z backupu, stabilna ścieżka między launchami
 - [x] paczki ≤ 100 eventów / ≤ 256 KB
 - [x] flush: co 10 s, przy 20 eventach, na wejściu w tło, na `flush()`
@@ -58,7 +65,7 @@ Reguły, których nie łamiemy:
 
 | Integracja | Co robi SDK | Stan |
 |---|---|---|
-| SwiftUI | `.trackScreen("Name")` | [x] |
+| SwiftUI | `.trackScreen("Name")` — cienka nakładka na `Union.screen`; sama ścieżka `$screen_view` ma test, modyfikator nie | [~] |
 | UIKit | `automaticScreenTracking` — swizzling `viewDidAppear`, kontrolery kontenerowe/systemowe pomijane | [~] |
 | Deep linki | `handleDeepLink(url)` z `onOpenURL` / scene delegate; bez automatycznego przechwytywania | [x] |
 | Środowisko | auto-detekcja: DEBUG → `development`, sandbox receipt → `testflight`, inaczej `production`; nadpisywalne w `Options` | [x] |
