@@ -22,14 +22,17 @@ struct DeviceContext: Codable, Sendable, Equatable {
     }
 }
 
-/// `identity` is always present; both keys are omitted (never null) when absent. Empty in strict_anonymous.
+/// `identity` is always present; keys are omitted (never null) when absent. Empty in strict_anonymous.
 struct Identity: Codable, Sendable, Equatable {
     var installId: String?
     var userId: String?
+    /// What the app says about the person (`name`, `email`, `plan`…). Omitted when empty.
+    var traits: [String: String]?
 
     enum CodingKeys: String, CodingKey {
         case installId = "install_id"
         case userId = "user_id"
+        case traits
     }
 
     static let anonymous = Identity()

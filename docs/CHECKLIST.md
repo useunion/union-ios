@@ -43,10 +43,16 @@ Reguły, których nie łamiemy:
 
 - [x] `strict_anonymous` → `identity` puste; `identify()` logowane jako zignorowane, nie wysyłane
 - [x] `product_analytics` → `install_id` z Keychain (to urządzenie) + opcjonalny `user_id`
+- [x] traits (`identify(userId:traits:)`): ≤ 8 kluczy, wartości ≤ 256 znaków, scalane po kluczu, trzymane
+  w Keychain obok id, kasowane przez `reset()` i `optOut()`. Zapisujemy je tak, jak przyszły — decyzję
+  „to jest PII i deklarujemy je w App Privacy" podejmuje aplikacja, nie SDK. Serwer scala tak samo
+  (`json_patch`) i kasuje traits, gdy retencja usunie ostatnią sesję instalacji.
 - [x] `optOut()` czyści kolejkę, tożsamość i sesję; `optIn()` przywraca zbieranie
 - [x] `PrivacyInfo.xcprivacy` w paczce (Product Interaction, Device ID, User ID, Other Diagnostic Data; `CA92.1`)
 - [ ] `requestDataDeletion()` to dziś alias `optOut()` — zamienić na realne żądanie, gdy API je wystawi
-- Nie logujemy: query stringów, treści wpisywanych przez użytkownika, tokenów, e-maili, współrzędnych, ID reklamowych.
+- Nie logujemy sami z siebie: query stringów, treści wpisywanych przez użytkownika, tokenów, współrzędnych,
+  ID reklamowych. E-mail czy nazwisko trafiają do Union **wyłącznie** wtedy, gdy aplikacja jawnie poda je
+  jako trait w `identify` — nigdy z autocapture.
 
 ## 4. Dostarczanie
 

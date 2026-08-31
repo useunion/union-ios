@@ -27,9 +27,15 @@ Union.screen("WorkoutDetail")                                        // or .trac
 Union.track("workout_started", properties: ["plan": "strength", "minutes": 30], role: .start)
 Union.track("workout_finished", role: .success)
 Union.identify(userId: "user_123")                                   // after login (product_analytics only)
+Union.identify(userId: "user_123", traits: ["email": "ada@example.com", "name": "Ada"])  // named in the panel
 Union.reset()                                                        // on logout
 Union.handleDeepLink(url)                                            // from onOpenURL / scene delegate
 ```
+
+Traits describe the person, so the panel can head a profile with a name instead of an id. Up to 8 keys,
+values ≤ 256 characters, merged key by key across calls; `reset()` forgets them with the user id. They are
+stored as sent — an app that puts an email or a name here is collecting that data and must declare it in
+its own App Privacy answers, which the SDK cannot do on its behalf.
 
 Event names: lowercase `snake_case`, max 64 chars. Properties: up to 32 keys; strings ≤ 256 chars, finite numbers, booleans. Invalid events are logged and dropped — the SDK never throws or crashes your app.
 

@@ -32,21 +32,33 @@ struct KeychainIdentityStore: IdentityStore {
     let service: String
     private let installKey = "install_id"
     private let userKey = "user_id"
+    private let traitsKey = "traits"
 
     init(service: String = "app.union.sdk") { self.service = service }
 
     func load() -> Identity {
-        Identity(installId: read(installKey), userId: read(userKey))
+        Identity(installId: read(installKey), userId: read(userKey), traits: readTraits())
     }
 
     func save(_ identity: Identity) {
         write(installKey, identity.installId)
         write(userKey, identity.userId)
+        // Same protection class as the ids: traits can name a real person, so they never go to a
+        // plist and never sync to iCloud.
+        write(traitsKey, identity.traits.flatMap { t in
+            (try? JSONEncoder().encode(t)).map { String(decoding: $0, as: UTF8.self) }
+        })
     }
 
     func wipe() {
         write(installKey, nil)
         write(userKey, nil)
+        write(traitsKey, nil)
+    }
+
+    private func readTraits() -> [String: String]? {
+        guard let raw = read(traitsKey), let data = raw.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode([String: String].self, from: data)
     }
 
     private func query(_ account: String) -> [String: Any] {

@@ -34,10 +34,17 @@ public enum Union {
         Task { await p.screen(name: name, properties: properties) }
     }
 
-    /// Attach your own user id after login. Ignored (with a warning) in `strictAnonymous`.
-    public static func identify(userId: String) {
+    /// Attach your own user id after login, optionally with traits describing the person —
+    /// `name`, `email`, `plan`. The panel shows them instead of a raw id, and they are merged
+    /// key by key across calls, so `identify(userId:traits:["plan": "pro"])` later does not erase
+    /// an email sent earlier. Up to 8 traits, values ≤ 256 characters.
+    ///
+    /// Traits are stored as sent. An app that puts an email or a name here is collecting that data
+    /// and has to say so in its own App Privacy answers — the SDK cannot declare it for you.
+    /// Ignored (with a warning) in `strictAnonymous`.
+    public static func identify(userId: String, traits: [String: String] = [:]) {
         guard let p = shared?.pipeline else { return }
-        Task { await p.identify(userId: userId) }
+        Task { await p.identify(userId: userId, traits: traits) }
     }
 
     /// Logout: forgets the user id and starts a new session. The install id is kept. Safe to call when nobody is

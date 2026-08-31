@@ -258,6 +258,75 @@ final class PipelineTests: XCTestCase {
         XCTAssertTrue(queued.isEmpty)
     }
 
+    func testIdentifyMergesTraitsAndSendsThemWithEveryBatch() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.identify(userId: "u-1", traits: ["email": "ada@example.com", "name": "Ada"])
+        await p.identify(userId: "u-1", traits: ["plan": "pro"])
+        await p.flush()
+
+        let identity = transport.sent[0].identity
+        XCTAssertEqual(identity.userId, "u-1")
+        XCTAssertEqual(identity.traits, ["email": "ada@example.com", "name": "Ada", "plan": "pro"],
+                       "a later identify adds traits, it does not replace the set")
+
+        let validator = try MiniSchemaValidator(schema: Fixtures.schemaData())
+        let errors = try validator.validate(WireCoding.encoder.encode(transport.sent[0]))
+        XCTAssertEqual(errors, [], errors.joined(separator: "\n"))
+    }
+
+    func testInvalidTraitsLeaveTheIdentityUntouched() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.identify(userId: "u-1", traits: ["email": "ada@example.com"])
+        await p.identify(userId: "u-1", traits: ["bio": String(repeating: "x", count: Limits.traitValueMaxLength + 1)])
+        await p.identify(userId: "u-1", traits: Dictionary(uniqueKeysWithValues: (0...Limits.maxTraits).map { ("k\($0)", "v") }))
+        await p.identify(userId: "u-1", traits: ["": "v"])
+
+        let identity = await p.currentIdentity
+        XCTAssertEqual(identity.traits, ["email": "ada@example.com"], "a rejected call changes nothing")
+    }
+
+    func testStrictAnonymousNeverSendsTraits() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport, privacy: .strictAnonymous)
+        await p.start(hadPersistentIdentity: false)
+        await p.identify(userId: "u-1", traits: ["email": "ada@example.com"])
+        await p.flush()
+
+        XCTAssertEqual(transport.sent[0].identity, .anonymous)
+        let json = String(decoding: try WireCoding.encoder.encode(transport.sent[0]), as: UTF8.self)
+        XCTAssertFalse(json.contains("ada@example.com"))
+        XCTAssertTrue(json.contains("\"identity\":{}"), json)
+    }
+
+    func testResetForgetsTheTraitsWithTheUser() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.identify(userId: "u-1", traits: ["email": "ada@example.com"])
+        await p.reset()
+        await p.flush()
+
+        let identity = transport.sent[0].identity
+        XCTAssertNil(identity.traits, "logging out forgets who the person was")
+        XCTAssertNil(identity.userId)
+        XCTAssertNotNil(identity.installId, "the install id survives: it identifies the device, not the person")
+    }
+
+    func testTraitsSurviveARelaunch() async {
+        let store = InMemoryIdentityStore()
+        let first = Fixtures.pipeline(identity: store)
+        await first.identify(userId: "u-1", traits: ["email": "ada@example.com"])
+
+        let transport = StubTransport()
+        let second = Fixtures.pipeline(transport: transport, identity: store)
+        await second.start(hadPersistentIdentity: true)
+        await second.flush()
+        XCTAssertEqual(transport.sent[0].identity.traits, ["email": "ada@example.com"])
+    }
+
     func testBatcherRespectsLimits() {
         let big = Event(eventId: UUIDv7.generate(), sessionId: UUIDv7.generate(), name: "x", timestamp: 0, screen: nil, properties: ["p": .string(String(repeating: "a", count: 250))], role: nil)
         let queue = Array(repeating: big, count: 1500)

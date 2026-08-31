@@ -2,6 +2,9 @@ import Foundation
 
 /// Mirror of `packages/contract/src/limits.ts`. A unit test cross-checks these against the JSON Schema fixture.
 enum Limits {
+    static let maxTraits = 8
+    static let traitKeyMaxLength = 40
+    static let traitValueMaxLength = 256
     static let batchMaxEvents = 100
     static let batchMaxBytes = 256 * 1024
     static let eventNameMaxLength = 64
@@ -22,6 +25,9 @@ enum ValidationError: Error, CustomStringConvertible, Equatable {
     case nonFiniteNumber(String)
     case screenTooLong
     case userIdTooLong
+    case tooManyTraits(Int)
+    case invalidTraitKey(String)
+    case traitTooLong(String)
 
     var description: String {
         switch self {
@@ -33,6 +39,9 @@ enum ValidationError: Error, CustomStringConvertible, Equatable {
         case .nonFiniteNumber(let k): return "property \"\(k)\" is not a finite number"
         case .screenTooLong: return "screen name exceeds \(Limits.screenNameMaxLength) chars"
         case .userIdTooLong: return "user id exceeds \(Limits.userIdMaxLength) chars"
+        case .tooManyTraits(let n): return "\(n) traits, max \(Limits.maxTraits)"
+        case .invalidTraitKey(let k): return "trait key \"\(k)\" must be 1–\(Limits.traitKeyMaxLength) chars"
+        case .traitTooLong(let k): return "trait \"\(k)\" exceeds \(Limits.traitValueMaxLength) chars"
         }
     }
 }
@@ -61,6 +70,17 @@ enum Validation {
 
     static func validate(screen: String?) throws {
         if let s = screen, s.count > Limits.screenNameMaxLength { throw ValidationError.screenTooLong }
+    }
+
+    /// Traits are the one place an app can send a real-world identifier, so they are validated as a
+    /// whole: one bad key rejects the call rather than silently sending a half-set the panel would
+    /// then show as the person's identity.
+    static func validate(traits: [String: String]) throws {
+        guard traits.count <= Limits.maxTraits else { throw ValidationError.tooManyTraits(traits.count) }
+        for (key, value) in traits {
+            guard !key.isEmpty, key.count <= Limits.traitKeyMaxLength else { throw ValidationError.invalidTraitKey(key) }
+            guard value.count <= Limits.traitValueMaxLength else { throw ValidationError.traitTooLong(key) }
+        }
     }
 
     static func validate(userId: String) throws {
