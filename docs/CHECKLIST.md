@@ -32,6 +32,25 @@ Reguły, których nie łamiemy:
 - Timeout sesji (30 min) liczy SDK **i** serwer — obie strony muszą dawać ten sam wynik.
 - `$…` nie ma wariantu „custom” — nowy event automatyczny wymaga wpisu w `AutoEventName` w repo `Union` **przed** implementacją tutaj.
 
+## 1a. Eventy klienta, których nazwę czyta serwer
+
+Trzecia kategoria, obok `$auto` i dowolnych eventów aplikacji: nazwa jest **dowolna z punktu widzenia
+kontraktu** (pasuje do `^[a-z][a-z0-9_]*$`), ale rollup w repo `Union` szuka jej dosłownie. Literówka
+albo własny synonim nie jest błędem walidacji — event przechodzi, a metryka po drugiej stronie po
+prostu nigdy nie rośnie. Cicha awaria, więc nazwy są tutaj, nie w cudzej głowie.
+
+| Event | Kto emituje | Właściwości | Co się psuje bez niego | Stan |
+|---|---|---|---|---|
+| `survey_displayed` | aplikacja, z callbacku `surveyDisplayed` Survicate | `survey_id` (string) | mianownik response rate w widoku NPS; panel mówi wtedy „unknown", nigdy nie zgaduje | [ ] |
+| `survey_closed` | aplikacja, z callbacku `surveyClosed` Survicate | `survey_id` (string) | rozróżnienie „zamknął bez odpowiedzi" od „nie zobaczył" | [ ] |
+
+Dlaczego to nie są eventy `$auto`: emituje je aplikacja z callbacku **cudzego** SDK, nie Union SDK
+z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlować.
+
+- [ ] rozważyć `Union.trackSurveyDisplayed(surveyId:)` / `…Closed` — cienkie wrappery na `track`,
+      których jedyna wartość to zabetonowanie nazwy i klucza właściwości w kompilatorze zamiast
+      w tym akapicie. Do zrobienia, gdy pojawi się druga aplikacja emitująca te eventy ręcznie.
+
 ## 2. Kontekst urządzenia (raz na paczkę, nie per event)
 
 `DeviceContext`: `app_version`, `app_build`, `sdk_version`, `os_name` (`iOS`), `os_version`, `device_model`, `locale`, `timezone`. Wszystkie obowiązkowe, wszystkie przycięte do limitów z kontraktu. Brak IDFA, brak ATT, brak dokładnej lokalizacji — IP skraca serwer.
@@ -50,6 +69,13 @@ Reguły, których nie łamiemy:
 - [x] `optOut()` czyści kolejkę, tożsamość i sesję; `optIn()` przywraca zbieranie
 - [x] `PrivacyInfo.xcprivacy` w paczce (Product Interaction, Device ID, User ID, Other Diagnostic Data; `CA92.1`)
 - [ ] `requestDataDeletion()` to dziś alias `optOut()` — zamienić na realne żądanie, gdy API je wystawi
+- [ ] wystawić `install_id` do odczytu (`Union.installId`), żeby aplikacja mogła podać go Survicate jako
+  trait. Dziś id jest w Keychain i nie ma publicznego gettera, więc styk z sekcji 5 jest niewykonalny
+  bez zmiany w SDK — to jedyna rzecz, która blokuje pełną atrybucję NPS po stronie klienta.
+- Odpowiedzi z ankiet: do Union jedzie **wyłącznie** fakt zdarzenia i `survey_id`. Nigdy treść
+  odpowiedzi, komentarz, score ani kategoria — score i kategorię Union bierze z webhooka Survicate,
+  a treści nie bierze wcale. `Union.track("survey_answered", ["comment": …])` byłoby złamaniem tej
+  zasady po stronie aplikacji: SDK tego nie zablokuje, więc pilnuje tego ten wiersz i review.
 - Nie logujemy sami z siebie: query stringów, treści wpisywanych przez użytkownika, tokenów, współrzędnych,
   ID reklamowych. E-mail czy nazwisko trafiają do Union **wyłącznie** wtedy, gdy aplikacja jawnie poda je
   jako trait w `identify` — nigdy z autocapture.
@@ -76,6 +102,7 @@ Reguły, których nie łamiemy:
 | Deep linki | `handleDeepLink(url)` z `onOpenURL` / scene delegate; bez automatycznego przechwytywania | [x] |
 | Środowisko | auto-detekcja: DEBUG → `development`, sandbox receipt → `testflight`, inaczej `production`; nadpisywalne w `Options` | [x] |
 | RevenueCat / revenue | **nic.** Revenue wchodzi webhookiem RC → `apps/ingest`, nie przez SDK. Jedyny styk: `Union.identify(userId:)` musi używać tego samego id co RC `app_user_id`, żeby atrybucja instalacji zadziałała | [x] |
+| Survicate / NPS | **prawie nic, ale dwa styki.** Odpowiedzi wchodzą webhookiem Survicate → `apps/ingest`; SDK nie czyta ankiet i nie wysyła odpowiedzi. Styk pierwszy: aplikacja ustawia `SurvicateSdk.shared.setUserTrait(UserTrait(withName: "union_install_id", value: <install_id>))`, żeby odpowiedź trafiła na profil osoby — bez tego Union próbuje dopasować po `user_id`, a w ostatniej kolejności pyta Data Export API. Styk drugi: eventy z sekcji 1a. Treści odpowiedzi Union nie przyjmuje w żadnej formie | [ ] |
 | Push / notyfikacje | poza MVP | [ ] |
 | Crash reporting | poza MVP (własnego nie budujemy) | — |
 | Feature flags | poza MVP | — |
