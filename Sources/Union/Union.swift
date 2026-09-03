@@ -82,4 +82,19 @@ public enum Union {
     }
 
     public static var isConfigured: Bool { shared != nil }
+
+    /// The pseudonymous install id, or `nil` before `configure(…)` and in
+    /// `strictAnonymous` — that mode stores no identity, so there is nothing to return
+    /// and returning a fresh id would quietly defeat it.
+    ///
+    /// Exposed so a backend can send `/v1/server` events for the same install: that
+    /// contract needs a `session_id` or an `install_id` to attribute an event, and a
+    /// customer's own `user_id` is not enough. Pass it to your server as an opaque
+    /// string; it is stable across launches and reinstalls on the same device.
+    ///
+    /// This is an identifier for a device, so an app that forwards it is responsible
+    /// for its own App Privacy answers — as with `identify(userId:traits:)`.
+    public static var installId: String? {
+        shared?.identityStore.load().installId
+    }
 }

@@ -327,6 +327,27 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(transport.sent[0].identity.traits, ["email": "ada@example.com"])
     }
 
+    /// `Union.installId` reads straight from the identity store, so these two cases are
+    /// the whole contract of that accessor: a real store hands back the minted id, and
+    /// `strictAnonymous` has nothing to hand back.
+    func testIdentityStoreExposesTheMintedInstallIdForServerEvents() async {
+        let store = InMemoryIdentityStore()
+        _ = Fixtures.pipeline(identity: store)
+
+        let installId = store.load().installId
+        XCTAssertNotNil(installId, "the id a backend needs for /v1/server is minted during init")
+        XCTAssertEqual(installId, store.load().installId, "and it is stable across reads")
+    }
+
+    func testStrictAnonymousExposesNoInstallId() async {
+        let store = InMemoryIdentityStore()
+        store.save(Identity(installId: UUIDv7.generate(), userId: nil, traits: nil))
+
+        _ = Fixtures.pipeline(privacy: .strictAnonymous, identity: store)
+
+        XCTAssertNil(store.load().installId, "strict_anonymous wipes identity, so there is no id to forward")
+    }
+
     func testBatcherRespectsLimits() {
         let big = Event(eventId: UUIDv7.generate(), sessionId: UUIDv7.generate(), name: "x", timestamp: 0, screen: nil, properties: ["p": .string(String(repeating: "a", count: 250))], role: nil)
         let queue = Array(repeating: big, count: 1500)

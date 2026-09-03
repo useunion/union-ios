@@ -4,6 +4,10 @@ import Foundation
 final class Client: Sendable {
     let pipeline: EventPipeline
     let logger: SDKLogger
+    /// Held so `Union.installId` can read the id without hopping onto the pipeline
+    /// actor: the facade is synchronous everywhere else, and an `async` getter here
+    /// would be the only call a caller has to await.
+    let identityStore: IdentityStore
     #if canImport(UIKit) && !os(watchOS)
     @MainActor private var lifecycle: AppLifecycleObserver?
     #endif
@@ -22,6 +26,7 @@ final class Client: Sendable {
         identityStore = privacyMode == .strictAnonymous ? NoopIdentityStore() : InMemoryIdentityStore()
         #endif
         let hadIdentity = identityStore.load().installId != nil
+        self.identityStore = identityStore
         pipeline = EventPipeline(
             config: PipelineConfig(writeKey: writeKey, environment: environment, privacyMode: privacyMode, flushAt: options.flushAt, flushInterval: options.flushInterval, maxQueuedEvents: options.maxQueuedEvents),
             store: store,
