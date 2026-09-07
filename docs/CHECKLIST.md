@@ -104,7 +104,7 @@ z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlowa
 | RevenueCat / revenue | **nic.** Revenue wchodzi webhookiem RC → `apps/ingest`, nie przez SDK. Jedyny styk: `Union.identify(userId:)` musi używać tego samego id co RC `app_user_id`, żeby atrybucja instalacji zadziałała | [x] |
 | Survicate / NPS | **prawie nic, ale dwa styki.** Odpowiedzi wchodzą webhookiem Survicate → `apps/ingest`; SDK nie czyta ankiet i nie wysyła odpowiedzi. Styk pierwszy: aplikacja ustawia `SurvicateSdk.shared.setUserTrait(UserTrait(withName: "union_install_id", value: <install_id>))`, żeby odpowiedź trafiła na profil osoby — bez tego Union próbuje dopasować po `user_id`, a w ostatniej kolejności pyta Data Export API. Styk drugi: eventy z sekcji 1a. Treści odpowiedzi Union nie przyjmuje w żadnej formie | [ ] |
 | Push / notyfikacje | poza MVP | [ ] |
-| Crash reporting | poza MVP (własnego nie budujemy) | — |
+| Crash reporting | **w planie, nie ma go w SDK.** Union ma własne crash reporting po stronie backendu (`POST /v1/crash`, kontrakt `schema/crash-batch.v1.json`, ADR 0004) i **nie ma producenta raportów** — dopóki nie powstanie handler tutaj, żaden projekt nie wyśle ani jednego crasha. Kształt: zapis na dysk przy śmierci procesu i wysyłka gzipem przy następnym starcie, `NSException` → sygnały → mach exception (kod handlera async-signal-safe), watchdog main threada dla hangów, breadcrumbs **bez wartości** (kontrakt nie ma na nie pola), domyślnie wyłączone w `Options` | [ ] |
 | Feature flags | poza MVP | — |
 
 Nowa integracja przechodzi ten sam próg: wiersz w tabeli + odpowiedź na pytanie „co dokładnie leci na wire i dlaczego to nie jest PII”.
