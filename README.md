@@ -56,9 +56,9 @@ on the next launch, so a crash appears minutes later, days later, or — for som
 never. That is why the panel's crash-free rate is a ceiling for a window that is still filling, and
 why "no crashes today" is not the same claim as "a stable day".
 
-There are two switches, and both have to be on. `Options.crashReporting` here, on by default, and the
-project's own **crash reporting** setting in Union, off by default. Until the project is enabled the
-uploads are refused and recorded as refusals, so nothing is stored and nothing is silently lost.
+There are two switches and both are on by default: `Options.crashReporting` here, and the project's
+own **crash reporting** setting in Union. Turning the project's off does not stop the upload — it
+turns it into a recorded refusal, so nothing is stored and nothing is silently lost either way.
 
 ```swift
 var o = Options()

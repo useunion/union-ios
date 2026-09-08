@@ -118,7 +118,7 @@ kto odinstalował, nigdy.
 | Wysyłka | `POST /v1/crash`, **gzip wymagany** (kontener składany ręcznie nad `Compression`, bez zależności). Kasujemy raport wyłącznie po 2xx albo po trwałym odrzuceniu (400/413/422); 5xx i błąd sieci **zostawiają plik** | [x] |
 | Retencja lokalna | `Options.maxStoredCrashReports` (16), najstarsze wypadają pierwsze — pętla crashy przy starcie bez sieci nie może zapchać dysku | [x] |
 | `optOut()` | kasuje też katalog crashów, nie tylko kolejkę eventów | [x] |
-| Domyślnie | **włączone** (`Options.crashReporting = true`). Druga bramka stoi po stronie serwera i jest domyślnie wyłączona (`crash_reporting_enabled` per projekt), więc appka z domyślnymi ustawieniami nic nie zapisze, dopóki ktoś nie włączy projektu — a ingest odnotuje tę odmowę wierszem, nie ciszą | [x] |
+| Domyślnie | **włączone** (`Options.crashReporting = true`), po obu stronach: serwerowa bramka `crash_reporting_enabled` też jest domyślnie włączona (migracja 0056 w repo `Union`). Wyłączenie po stronie projektu **nie** zatrzymuje uploadu — zamienia go w zapisaną odmowę (`collection_disabled`), więc nic nie ginie po cichu | [x] |
 | Symbolikacja | **żadnej.** Offsety to tożsamość, symbole to wyświetlanie: panel podaje gotową komendę `atos` per obraz. Upload dSYM jest poza zakresem i nie przegrupuje historii, gdy powstanie | — |
 
 Reguły, których nie łamiemy:
