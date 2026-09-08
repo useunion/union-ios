@@ -75,6 +75,57 @@ public enum Union {
         Task { await p.deepLink(url) }
     }
 
+    // MARK: - Crashes
+
+    /**
+     * An error the app caught and wants counted anyway.
+     *
+     * Reported as a `nonfatal`, which is a **separate severity** and never added to the crash count:
+     * a caught error and a terminated process are two different facts about the app, and one number
+     * over both would describe neither. It counts toward nothing that carries the word "crash-free".
+     *
+     * The stack is the caller's, taken here. Write it where the error was handled, not in a shared
+     * logging helper — a helper's stack groups every unrelated error into one issue.
+     */
+    public static func recordError(_ type: String, reason: String? = nil) {
+        shared?.crash?.recordError(type: type, reason: reason)
+    }
+
+    /// The same for a Swift `Error`. The type name is the group; `localizedDescription` is the sample
+    /// message, and like every app-authored string it may carry personal data the app chose to put
+    /// there.
+    public static func recordError(_ error: Error) {
+        shared?.crash?.recordError(type: String(describing: Swift.type(of: error)),
+                                   reason: error.localizedDescription)
+    }
+
+    /**
+     * A label attached to every crash report from now on — Crashlytics' "custom keys".
+     *
+     * Up to 8 keys, values ≤ 256 characters. Pass `nil` to remove one. Ignored in
+     * `strictAnonymous`: an app that may not send a `user_id` may not send an email under a crash
+     * key instead, and the server refuses such a report as well.
+     *
+     * These are app-authored strings about a person, so — as with `identify(userId:traits:)` — an app
+     * that puts an identifier here is collecting it and answers for it in its own App Privacy
+     * disclosures.
+     */
+    public static func setCrashKey(_ key: String, _ value: String?) {
+        shared?.crash?.setCustomKey(key, value)
+    }
+
+    /**
+     * A note in the trail that a crash report carries — a name, never a value.
+     *
+     * There is deliberately no parameter for a value: breadcrumbs are dumped by the crash handler and
+     * so never pass the remote kill switch that filters events, which means a value here would carry
+     * app data out of screens a customer believed were excluded. Screens and events already leave
+     * their own breadcrumbs; this is for the steps in between.
+     */
+    public static func leaveBreadcrumb(_ name: String) {
+        shared?.crash?.breadcrumb(.log, name)
+    }
+
     /// Sends queued events now. The SDK also flushes every `Options.flushInterval`, at `flushAt` events and on background.
     public static func flush() async {
         guard let p = shared?.pipeline else { return }

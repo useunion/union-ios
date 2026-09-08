@@ -65,6 +65,35 @@ public struct Options: Sendable {
     public var maxQueuedEvents: Int = 1000
     /// Swizzles `UIViewController.viewDidAppear` to emit `$screen_view`. Off by default; SwiftUI apps use `.trackScreen`.
     public var automaticScreenTracking: Bool = false
+
+    /**
+     * Crash, hang and non-fatal reporting. **On by default.**
+     *
+     * On, because a crash reporter nobody switched on is a crash reporter that reports nothing, and
+     * the failure mode is silent: the panel would show an empty Crashes view that reads exactly like
+     * a stable app. The cost of being on is bounded — the handlers are installed once at launch and
+     * do nothing until the process dies.
+     *
+     * There is a second switch, on the other side, and it is off by default: the project's
+     * `crash_reporting_enabled` in Union. So an app that ships with this on still stores nothing
+     * until somebody enables the project, and the ingest answers those uploads with a recorded
+     * refusal rather than silently keeping them.
+     *
+     * Setting this to `false` installs nothing at all: no signal handlers, no mach exception port,
+     * no watchdog thread, and no crash directory.
+     */
+    public var crashReporting: Bool = true
+    /// Reports a `hang` when the main thread stops answering for this long. Ignored when
+    /// `crashReporting` is off.
+    public var hangDetection: Bool = true
+    /// Apple's own watchdog kills an unresponsive app at around 8 seconds on launch; two seconds is
+    /// long enough that ordinary work does not trip it and short enough to still be a hang a person
+    /// felt.
+    public var hangThreshold: TimeInterval = 2
+    /// Crash upload endpoint. Derived from `endpoint` (`/v1/batch` → `/v1/crash`) unless set.
+    public var crashEndpoint: URL? = nil
+    /// Ceiling on crash reports kept on disk when uploads keep failing. Oldest are dropped first.
+    public var maxStoredCrashReports: Int = 16
     public var logLevel: LogLevel = .warning
     /// Receives every SDK log line; useful to forward into the host app's logger or the debug inspector.
     public var logHandler: (@Sendable (LogLevel, String) -> Void)? = nil

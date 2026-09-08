@@ -1,0 +1,433 @@
+{
+  "$ref": "#/definitions/CrashBatchV1",
+  "definitions": {
+    "CrashBatchV1": {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "type": "number",
+          "const": 1
+        },
+        "batch_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "environment": {
+          "type": "string",
+          "enum": [
+            "development",
+            "testflight",
+            "production"
+          ]
+        },
+        "privacy_mode": {
+          "type": "string",
+          "enum": [
+            "strict_anonymous",
+            "product_analytics"
+          ]
+        },
+        "sent_at": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "identity": {
+          "type": "object",
+          "properties": {
+            "install_id": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "user_id": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "traits": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "propertyNames": {
+                "minLength": 1,
+                "maxLength": 40
+              }
+            }
+          },
+          "additionalProperties": false,
+          "default": {}
+        },
+        "reports": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "crash_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "fatal",
+                  "nonfatal",
+                  "hang",
+                  "anr"
+                ]
+              },
+              "is_fatal": {
+                "type": "boolean"
+              },
+              "crashed_at": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "session_id": {
+                "type": "string",
+                "format": "uuid"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "app_version": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "app_build": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "sdk_version": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "os_name": {
+                    "type": "string",
+                    "const": "iOS"
+                  },
+                  "os_version": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "device_model": {
+                    "type": "string",
+                    "maxLength": 64
+                  },
+                  "locale": {
+                    "type": "string",
+                    "maxLength": 16
+                  },
+                  "timezone": {
+                    "type": "string",
+                    "maxLength": 64
+                  }
+                },
+                "required": [
+                  "app_version",
+                  "app_build",
+                  "sdk_version",
+                  "os_name",
+                  "os_version",
+                  "device_model",
+                  "locale",
+                  "timezone"
+                ],
+                "additionalProperties": false
+              },
+              "state": {
+                "type": "object",
+                "properties": {
+                  "orientation": {
+                    "type": "string",
+                    "enum": [
+                      "portrait",
+                      "landscape",
+                      "unknown"
+                    ]
+                  },
+                  "free_memory_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "total_memory_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "free_disk_bytes": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "battery_level": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "battery_state": {
+                    "type": "string",
+                    "enum": [
+                      "unknown",
+                      "unplugged",
+                      "charging",
+                      "full"
+                    ]
+                  },
+                  "jailbroken": {
+                    "type": "boolean"
+                  },
+                  "low_power_mode": {
+                    "type": "boolean"
+                  },
+                  "in_foreground": {
+                    "type": "boolean"
+                  },
+                  "uptime_ms": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "additionalProperties": false
+              },
+              "signal": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "code": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "mach_exception": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "mach_code": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "mach_subcode": {
+                    "type": "string",
+                    "maxLength": 32
+                  },
+                  "fault_addr": {
+                    "type": "string",
+                    "pattern": "^0x[0-9a-f]{1,16}$"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              "exception": {
+                "type": "object",
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "maxLength": 128
+                  },
+                  "reason": {
+                    "type": "string",
+                    "maxLength": 1024
+                  }
+                },
+                "required": [
+                  "type"
+                ],
+                "additionalProperties": false
+              },
+              "hang_duration_ms": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "images": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string",
+                      "maxLength": 256
+                    },
+                    "uuid": {
+                      "type": "string",
+                      "pattern": "^[0-9A-F]{32}$"
+                    },
+                    "load_addr": {
+                      "$ref": "#/definitions/CrashBatchV1/properties/reports/items/properties/signal/properties/fault_addr"
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "arch": {
+                      "type": "string",
+                      "maxLength": 16
+                    },
+                    "is_app": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "uuid",
+                    "load_addr",
+                    "is_app"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 512
+              },
+              "threads": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 128
+                    },
+                    "crashed": {
+                      "type": "boolean"
+                    },
+                    "frames": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "n": {
+                            "type": "integer",
+                            "minimum": 0
+                          },
+                          "addr": {
+                            "$ref": "#/definitions/CrashBatchV1/properties/reports/items/properties/signal/properties/fault_addr"
+                          },
+                          "image": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "offset": {
+                            "anyOf": [
+                              {
+                                "type": "integer",
+                                "minimum": 0
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "symbol": {
+                            "type": "string",
+                            "maxLength": 256
+                          }
+                        },
+                        "required": [
+                          "n",
+                          "addr",
+                          "image",
+                          "offset"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "maxItems": 128
+                    },
+                    "frames_truncated": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "index",
+                    "crashed",
+                    "frames",
+                    "frames_truncated"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 48
+              },
+              "breadcrumbs": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "ts": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "event",
+                        "screen",
+                        "log",
+                        "state"
+                      ]
+                    },
+                    "name": {
+                      "type": "string",
+                      "maxLength": 128
+                    }
+                  },
+                  "required": [
+                    "ts",
+                    "kind",
+                    "name"
+                  ],
+                  "additionalProperties": false
+                },
+                "maxItems": 64
+              },
+              "custom_keys": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 256
+                },
+                "propertyNames": {
+                  "minLength": 1,
+                  "maxLength": 40
+                },
+                "maxProperties": 8
+              }
+            },
+            "required": [
+              "crash_id",
+              "kind",
+              "is_fatal",
+              "crashed_at",
+              "context",
+              "images",
+              "threads"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 8
+        }
+      },
+      "required": [
+        "contract_version",
+        "batch_id",
+        "environment",
+        "privacy_mode",
+        "sent_at",
+        "reports"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#"
+}

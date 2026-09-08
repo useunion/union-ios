@@ -8,6 +8,8 @@ final class Client: Sendable {
     /// actor: the facade is synchronous everywhere else, and an `async` getter here
     /// would be the only call a caller has to await.
     let identityStore: IdentityStore
+    /// `nil` when `Options.crashReporting` is off — nothing is installed then, not even the directory.
+    let crash: CrashReporter?
     #if canImport(UIKit) && !os(watchOS)
     @MainActor private var lifecycle: AppLifecycleObserver?
     #endif
@@ -37,16 +39,60 @@ final class Client: Sendable {
             logger: logger,
             device: device
         )
-        logger.log(.info, "configured · env=\(environment.rawValue) · privacy=\(privacyMode.rawValue) · sdk=\(SDKInfo.version)")
+        /*
+         * Crash reporting is installed before the first event is pushed, because the window it cannot
+         * cover is the window before it exists — and a crash during launch is the crash a developer
+         * most wants and least often gets.
+         */
+        let reporter = options.crashReporting
+            ? Client.makeCrashReporter(writeKey: writeKey, keyHash: keyHash, environment: environment,
+                                       privacyMode: privacyMode, options: options, device: device,
+                                       identityStore: identityStore, logger: logger)
+            : nil
+        crash = reporter
+        logger.log(.info, "configured · env=\(environment.rawValue) · privacy=\(privacyMode.rawValue) · sdk=\(SDKInfo.version) · crashes=\(options.crashReporting ? "on" : "off")")
         let p = pipeline
+        if let reporter {
+            Task { await p.attach(crash: reporter) }
+            reporter.start(sessionId: nil)
+        }
         Task { await p.start(hadPersistentIdentity: hadIdentity) }
         #if canImport(UIKit) && !os(watchOS)
         let auto = options.automaticScreenTracking
         Task { @MainActor in
-            self.lifecycle = AppLifecycleObserver(pipeline: p)
+            self.lifecycle = AppLifecycleObserver(pipeline: p, crash: reporter)
             if auto { AutomaticScreenTracking.install() }
         }
         #endif
+    }
+
+    private static func makeCrashReporter(writeKey: String,
+                                          keyHash: String,
+                                          environment: Environment,
+                                          privacyMode: PrivacyMode,
+                                          options: Options,
+                                          device: DeviceContext,
+                                          identityStore: IdentityStore,
+                                          logger: SDKLogger) -> CrashReporter? {
+        guard let store = try? CrashStore.standard(directoryName: keyHash) else {
+            // No directory means no descriptor for the handler to write to, so there is nothing to
+            // install. Said out loud rather than left as a reporter that silently reports nothing.
+            logger.log(.warning, "crash: could not create the crash directory — crash reporting is off")
+            return nil
+        }
+        let endpoint = options.crashEndpoint ?? URLSessionCrashTransport.endpoint(from: options.endpoint)
+        return CrashReporter(
+            config: CrashReporter.Config(writeKey: writeKey, environment: environment,
+                                         privacyMode: privacyMode, hangThreshold: options.hangThreshold,
+                                         detectHangs: options.hangDetection,
+                                         maxStored: options.maxStoredCrashReports),
+            store: store,
+            transport: URLSessionCrashTransport(endpoint: endpoint),
+            identityStore: identityStore,
+            device: device,
+            logger: logger,
+            clock: SystemClock()
+        )
     }
 
     /// FNV-1a 64-bit, base-36. Stable across launches and OS versions; only used to name the on-disk queue directory.

@@ -29,6 +29,12 @@ actor EventPipeline {
     private var flushing = false
     private var timer: Task<Void, Never>?
     private(set) var optedOut = false
+    /// Set by `Client` right after construction. Optional because crash reporting can be off, and
+    /// because every crash call from here has to be a no-op then rather than a branch at each site.
+    private var crash: CrashReporter?
+    /// Only pushed to the reporter when it changes: the sidecar is a file, and one write per event
+    /// would put a disk write in front of every `track`.
+    private var crashSessionId: String?
 
     init(config: PipelineConfig, store: EventStore, transport: Transport, identityStore: IdentityStore, kv: KeyValueStore, clock: Clock, logger: SDKLogger, device: DeviceContext) {
         self.config = config
@@ -54,6 +60,8 @@ actor EventPipeline {
     }
 
     private let kv: KeyValueStore
+
+    func attach(crash: CrashReporter?) { self.crash = crash }
 
     // MARK: - Lifecycle entry points (called by Client / AppLifecycleObserver)
 
@@ -197,6 +205,10 @@ actor EventPipeline {
         identity = .anonymous
         session.clear()
         timer?.cancel(); timer = nil
+        // Crash reports are local data like any other: opting out has to take the ones already on
+        // disk, or "wiped" would be true of the event queue and false of the crash directory.
+        crash?.wipe()
+        crashSessionId = nil
         logger.log(.info, "opted out: collection stopped, local data wiped")
     }
 
@@ -279,6 +291,27 @@ actor EventPipeline {
     private func nowMs() -> Int64 { Int64(clock.now.timeIntervalSince1970 * 1000) }
 
     private func push(_ e: Event) {
+        /*
+         * The one funnel every event passes through, which is why the breadcrumb trail is written
+         * here rather than in `track`, `screen` and each auto-event site: a trail that misses
+         * `$background` because somebody added an event path and forgot a call is a trail that lies
+         * about what happened before the crash.
+         *
+         * Names only — a screen name or an event name. There is nowhere to put a property, by
+         * design: breadcrumbs bypass the remote kill switch, so a value here would carry event
+         * properties out of screens the app believed were excluded.
+         */
+        if let crash {
+            if e.sessionId != crashSessionId {
+                crashSessionId = e.sessionId
+                crash.setSessionId(e.sessionId)
+            }
+            if e.name == AutoEvent.screenView.rawValue, let screen = e.screen {
+                crash.breadcrumb(.screen, screen)
+            } else {
+                crash.breadcrumb(.event, e.name)
+            }
+        }
         queue.append(e)
         if queue.count > config.maxQueuedEvents {
             let drop = queue.count - config.maxQueuedEvents
