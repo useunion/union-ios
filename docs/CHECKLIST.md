@@ -93,6 +93,45 @@ z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlowa
 - [ ] niezgodność środowiska klucza wraca jako `invalid_batch` bez `details` — rozpoznajemy po `message`; usunąć, gdy ingest doda `path: "environment"`
 - SDK nigdy nie rzuca i nie ubija hosta: nieprawidłowy event jest logowany i porzucany.
 
+## 4a. Crashe, hangi i non-fatale
+
+Kontrakt: `packages/contract/src/crash-batch.ts` w repo `Union` (kopia schematu w
+`Tests/UnionTests/Fixtures/crash-batch.v1.json`, walidowana testem na każdej kodowanej paczce).
+Decyzja i granice: `docs/Engineering/ADR/0004-own-crash-reporting.md` w repo `Union`.
+
+**Jeden fakt, z którego wynika cała reszta: crasha nie wysyła proces, który umarł.** Handler zapisuje
+rekord na dysk, a SDK wysyła go przy **następnym uruchomieniu** — po minutach, po dniach, a dla kogoś,
+kto odinstalował, nigdy.
+
+| Element | Co robi SDK | Stan |
+|---|---|---|
+| Handler sygnałów | `SIGSEGV`, `SIGBUS`, `SIGILL`, `SIGFPE`, `SIGABRT`, `SIGTRAP`, `SIGSYS` + `sigaltstack` (bez niego przepełnienie stosu nie ma gdzie się obsłużyć). Kod handlera jest w **C** (`Sources/UnionCrashCore`), bo musi być async-signal-safe: bez alokacji, bez Obj-C, bez locków, bez runtime'u Swifta. Po zapisie przywraca poprzedni handler i re-raise'uje — Apple też musi dostać swój crash log | [x] |
+| Mach exception port | `EXC_BAD_ACCESS`, `EXC_BAD_INSTRUCTION`, `EXC_ARITHMETIC`, `EXC_BREAKPOINT` na własnym wątku; odpowiada `KERN_FAILURE`, czyli oddaje obsługę dalej. Pierwszy zapis wygrywa (mach i sygnał opisują tę samą śmierć) | [x] |
+| `NSException` | `NSSetUncaughtExceptionHandler` — jedyne miejsce, gdzie widać **co** zostało rzucone; przez `SIGABRT` wszystkie takie crashe zlałyby się w jedno bezsensowne issue. Poprzedni handler jest wołany, żeby cudzy reporter nie zamilkł | [x] |
+| Hangi | watchdog na własnym wątku pinguje main queue; brak odpowiedzi ponad `Options.hangThreshold` (2 s) = `kind: 'hang'` ze stosem **main threada**, nie watchdoga. Jeden raport na epizod i **zmierzony** czas, nigdy próg | [x] |
+| Non-fatale | `Union.recordError(_:reason:)` / `recordError(_ error:)` → `kind: 'nonfatal'`, `is_fatal: false`. Osobna dotkliwość, nigdy dodawana do liczby crashy | [x] |
+| Breadcrumbs | ring buffer w C (64 wpisy), zasilany z jednego lejka `push()` w pipeline — screeny, eventy auto i własne — plus `Union.leaveBreadcrumb(_:)`. **Nazwy, nigdy wartości**: kontrakt nie ma pola na wartość, bo breadcrumbs nie przechodzą przez zdalny kill switch eventów | [x] |
+| Custom keys | `Union.setCrashKey(_:_:)`, ≤ 8 kluczy, wartości ≤ 256 znaków. **Zakazane w `strictAnonymous`** — appka, która nie może wysłać `user_id`, nie może przesłać `{"email": …}` pod kluczem crasha; serwer odrzuca taki batch niezależnie | [x] |
+| Obrazy binarne | snapshot dyld **przy instalacji** (`LC_UUID`, `__TEXT`), bo w handlerze wzięcie locka dyld to deadlock. Konsekwencja jest udokumentowana: biblioteka doładowana później nie ma wpisu, a jej ramki idą z `image: null` | [x] |
+| Stos | własne przejście po łańcuchu frame pointerów (nigdy `backtrace()` — libunwind alokuje i bierze locki), z walidacją każdego kroku; `arm64` przez akcesory pc/lr/fp, żeby nie wysłać adresu z bitami PAC | [x] |
+| Stan urządzenia | próbkowany **przed** crashem (pamięć, dysk, bateria, orientacja, jailbreak) i opisany jako próbka; `uptime_ms` i `in_foreground` czyta sam handler. Każde pole opcjonalne — brak odpowiedzi zostaje brakiem, nigdy zerem | [x] |
+| Wysyłka | `POST /v1/crash`, **gzip wymagany** (kontener składany ręcznie nad `Compression`, bez zależności). Kasujemy raport wyłącznie po 2xx albo po trwałym odrzuceniu (400/413/422); 5xx i błąd sieci **zostawiają plik** | [x] |
+| Retencja lokalna | `Options.maxStoredCrashReports` (16), najstarsze wypadają pierwsze — pętla crashy przy starcie bez sieci nie może zapchać dysku | [x] |
+| `optOut()` | kasuje też katalog crashów, nie tylko kolejkę eventów | [x] |
+| Domyślnie | **włączone** (`Options.crashReporting = true`). Druga bramka stoi po stronie serwera i jest domyślnie wyłączona (`crash_reporting_enabled` per projekt), więc appka z domyślnymi ustawieniami nic nie zapisze, dopóki ktoś nie włączy projektu — a ingest odnotuje tę odmowę wierszem, nie ciszą | [x] |
+| Symbolikacja | **żadnej.** Offsety to tożsamość, symbole to wyświetlanie: panel podaje gotową komendę `atos` per obraz. Upload dSYM jest poza zakresem i nie przegrupuje historii, gdy powstanie | — |
+
+Reguły, których nie łamiemy:
+- **Trzy zegary są rozdzielne.** `crashed_at` (atrybucja dnia), `sent_at` (opóźnienie uploadu),
+  `received_at` (retencja, po stronie serwera). Zlepienie dowolnych dwóch jest kłamstwem.
+- **Kontekst jest z chwili crasha, nie z chwili wysyłki.** Appka prawie zawsze zostaje w międzyczasie
+  zaktualizowana, a przypisanie crasha do wersji, która go zaraportowała, obwinia release, który go
+  naprawił.
+- **Rekord bez wątku oznaczonego jako crashed jest porzucany, nie naprawiany.** Wybranie wątku 0
+  postawiłoby issue, regresję i alert na stosie, o którym nikt nie ustalił, że zabił proces.
+- **Rekord w nowszym formacie jest odrzucany, nie reinterpretowany** (`UNION_CRASH_RECORD_VERSION`).
+  Źle odczytany stos daje wiarygodne ramki i odcisk, który skleja niepowiązane crashe.
+
 ## 5. Integracje
 
 | Integracja | Co robi SDK | Stan |
@@ -104,7 +143,7 @@ z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlowa
 | RevenueCat / revenue | **nic.** Revenue wchodzi webhookiem RC → `apps/ingest`, nie przez SDK. Jedyny styk: `Union.identify(userId:)` musi używać tego samego id co RC `app_user_id`, żeby atrybucja instalacji zadziałała | [x] |
 | Survicate / NPS | **prawie nic, ale dwa styki.** Odpowiedzi wchodzą webhookiem Survicate → `apps/ingest`; SDK nie czyta ankiet i nie wysyła odpowiedzi. Styk pierwszy: aplikacja ustawia `SurvicateSdk.shared.setUserTrait(UserTrait(withName: "union_install_id", value: <install_id>))`, żeby odpowiedź trafiła na profil osoby — bez tego Union próbuje dopasować po `user_id`, a w ostatniej kolejności pyta Data Export API. Styk drugi: eventy z sekcji 1a. Treści odpowiedzi Union nie przyjmuje w żadnej formie | [ ] |
 | Push / notyfikacje | poza MVP | [ ] |
-| Crash reporting | **w planie, nie ma go w SDK.** Union ma własne crash reporting po stronie backendu (`POST /v1/crash`, kontrakt `schema/crash-batch.v1.json`, ADR 0004) i **nie ma producenta raportów** — dopóki nie powstanie handler tutaj, żaden projekt nie wyśle ani jednego crasha. Kształt: zapis na dysk przy śmierci procesu i wysyłka gzipem przy następnym starcie, `NSException` → sygnały → mach exception (kod handlera async-signal-safe), watchdog main threada dla hangów, breadcrumbs **bez wartości** (kontrakt nie ma na nie pola), domyślnie wyłączone w `Options` | [ ] |
+| Crash reporting | **własne, zaimplementowane** — patrz sekcja 4a. Kontrakt to `crash-batch.v1.json`, nie `EventBatch` | [x] |
 | Feature flags | poza MVP | — |
 
 Nowa integracja przechodzi ten sam próg: wiersz w tabeli + odpowiedź na pytanie „co dokładnie leci na wire i dlaczego to nie jest PII”.

@@ -1,6 +1,6 @@
 # Union iOS SDK
 
-Product analytics for iOS apps: live sessions, screens, features, releases. iOS 16+, Swift Package, no third-party dependencies, no IDFA.
+Product analytics and crash reporting for iOS apps: live sessions, screens, features, releases, crashes. iOS 16+, Swift Package, no third-party dependencies, no IDFA.
 
 ## Install
 
@@ -38,6 +38,43 @@ stored as sent — an app that puts an email or a name here is collecting that d
 its own App Privacy answers, which the SDK cannot do on its behalf.
 
 Event names: lowercase `snake_case`, max 64 chars. Properties: up to 32 keys; strings ≤ 256 chars, finite numbers, booleans. Invalid events are logged and dropped — the SDK never throws or crashes your app.
+
+## Crashes, hangs and non-fatals
+
+On by default. `configure` installs the handlers — signals, mach exceptions, `NSException` — and a
+watchdog that notices when the main thread stops answering. Nothing else is needed:
+
+```swift
+Union.recordError("PaymentFailed", reason: "card_declined")   // a caught error, counted separately
+Union.recordError(error)                                       // same, from a Swift Error
+Union.setCrashKey("plan", "pro")                               // ≤ 8 labels on every later report
+Union.leaveBreadcrumb("retrying_upload")                       // a name in the trail — never a value
+```
+
+**A crash is not sent by the process that died.** The handler writes it to disk and the SDK uploads it
+on the next launch, so a crash appears minutes later, days later, or — for someone who uninstalls —
+never. That is why the panel's crash-free rate is a ceiling for a window that is still filling, and
+why "no crashes today" is not the same claim as "a stable day".
+
+There are two switches, and both have to be on. `Options.crashReporting` here, on by default, and the
+project's own **crash reporting** setting in Union, off by default. Until the project is enabled the
+uploads are refused and recorded as refusals, so nothing is stored and nothing is silently lost.
+
+```swift
+var o = Options()
+o.crashReporting = false     // installs nothing at all: no handlers, no watchdog, no crash directory
+o.hangDetection = true       // main-thread freezes, reported as `hang` — never added to crash counts
+o.hangThreshold = 2          // seconds unanswered before it counts as a hang
+```
+
+Symbols are not part of this. Frames travel as image UUID + offset, which is the one form that is
+identical with and without a dSYM, and the panel hands you the exact `atos` command per image. So
+uploading dSYMs later can enrich an issue without regrouping its history — and issues grouped without
+symbols cover one build, which the panel says out loud.
+
+Custom keys are app-authored strings about a person, so they are refused in `strictAnonymous` for the
+same reason `identify` is, and — like traits — an app that puts an identifier there is collecting it
+and answers for it in its own App Privacy disclosures. Breadcrumbs have no field for a value at all.
 
 ### Options
 
