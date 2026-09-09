@@ -52,6 +52,9 @@ final class ValidationTests: XCTestCase {
         XCTAssertEqual(custom["pattern"] as? String, Limits.eventNamePattern)
         XCTAssertEqual(custom["maxLength"] as? Int, Limits.eventNameMaxLength)
         XCTAssertEqual((eventProps["screen"] as! [String: Any])["maxLength"] as? Int, Limits.screenNameMaxLength)
+        let feature = eventProps["feature"] as! [String: Any]
+        XCTAssertEqual(feature["maxLength"] as? Int, Limits.featureKeyMaxLength)
+        XCTAssertEqual(feature["pattern"] as? String, Limits.featureKeyPattern)
 
         let identity = (props["identity"] as! [String: Any])["properties"] as! [String: Any]
         XCTAssertEqual((identity["user_id"] as! [String: Any])["maxLength"] as? Int, Limits.userIdMaxLength)

@@ -119,31 +119,41 @@ actor EventPipeline {
 
     // MARK: - Public operations
 
-    func track(name: String, properties: [String: PropertyValue], role: FeatureRole?, screen: String?) {
+    /// An invalid feature key drops the whole event rather than sending it without the key: an event
+    /// stripped of the feature it was written for would read on the server as "part of no feature".
+    func track(name: String, properties: [String: PropertyValue], feature: String? = nil, role: FeatureRole?, screen: String?) {
         guard !optedOut, !stopped else { return }
         do {
             try Validation.validateCustomName(name)
             try Validation.validate(properties: properties)
             try Validation.validate(screen: screen)
+            try Validation.validate(featureKey: feature)
         } catch {
             logger.log(.warning, "dropped event \"\(name)\": \(error)")
             return
         }
         let sid = liveSessionId()
-        push(Event(eventId: UUIDv7.generate(now: clock.now), sessionId: sid, name: name, timestamp: nowMs(), screen: screen, properties: properties.isEmpty ? nil : properties, role: role))
+        push(Event(eventId: UUIDv7.generate(now: clock.now), sessionId: sid, name: name, timestamp: nowMs(), screen: screen, properties: properties.isEmpty ? nil : properties, feature: feature, role: role))
         scheduleFlushIfNeeded()
     }
 
-    func screen(name: String, properties: [String: PropertyValue]) {
+    /// `feature` makes this screen view the feature's discovery step (`role` is implied on the server).
+    func screen(name: String, properties: [String: PropertyValue], feature: String? = nil) {
         guard !optedOut, !stopped else { return }
         do {
             try Validation.validate(screen: name)
             try Validation.validate(properties: properties)
+            try Validation.validate(featureKey: feature)
         } catch {
             logger.log(.warning, "dropped screen \"\(name)\": \(error)")
             return
         }
-        push(system(.screenView, sessionId: liveSessionId(), screen: name, properties: properties.isEmpty ? nil : properties))
+        var event = system(.screenView, sessionId: liveSessionId(), screen: name, properties: properties.isEmpty ? nil : properties)
+        if let feature {
+            event.feature = feature
+            event.role = .discovery
+        }
+        push(event)
         scheduleFlushIfNeeded()
     }
 

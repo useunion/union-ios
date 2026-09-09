@@ -177,6 +177,45 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(id, .anonymous)
     }
 
+    func testDeclaredFeatureTravelsOnTheEventAndTheScreenViewAndConformsToSchema() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.screen(name: "Checkout", properties: [:], feature: "checkout")
+        await p.track(name: "checkout_started", properties: [:], feature: "checkout", role: .start, screen: nil)
+        await p.track(name: "order_placed", properties: ["total": 49.9], feature: "checkout", role: .success, screen: nil)
+        await p.flush()
+
+        let batch = transport.sent[0]
+        let view = batch.events.first { $0.name == "$screen_view" }!
+        XCTAssertEqual(view.feature, "checkout")
+        XCTAssertEqual(view.role, .discovery, "a screen view declared for a feature is its discovery step")
+        XCTAssertEqual(view.screen, "Checkout")
+        let placed = batch.events.first { $0.name == "order_placed" }!
+        XCTAssertEqual(placed.feature, "checkout")
+        XCTAssertEqual(placed.role, .success)
+
+        let validator = try MiniSchemaValidator(schema: Fixtures.schemaData())
+        let errors = try validator.validate(WireCoding.encoder.encode(batch))
+        XCTAssertEqual(errors, [], errors.joined(separator: "\n"))
+    }
+
+    func testInvalidFeatureKeyDropsTheEventInsteadOfStrippingTheKey() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.track(name: "order_placed", properties: [:], feature: "Checkout", role: .success, screen: nil)
+        await p.track(name: "order_placed", properties: [:], feature: "$checkout", role: .success, screen: nil)
+        await p.track(name: "order_placed", properties: [:], feature: String(repeating: "k", count: Limits.featureKeyMaxLength + 1), role: .success, screen: nil)
+        await p.screen(name: "Checkout", properties: [:], feature: "bad key")
+        await p.track(name: "kept", properties: [:], feature: nil, role: nil, screen: nil)
+        await p.flush()
+
+        let names = transport.sent[0].events.filter { !$0.name.hasPrefix("$") }.map(\.name)
+        XCTAssertEqual(names, ["kept"], "an event with a bad key is not sent without it")
+        XCTAssertFalse(transport.sent[0].events.contains { $0.name == "$screen_view" })
+    }
+
     func testScreenViewCarriesTheScreenNameAndItsProperties() async {
         let transport = StubTransport()
         let p = Fixtures.pipeline(transport: transport)

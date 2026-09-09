@@ -9,12 +9,25 @@ struct Event: Codable, Sendable, Equatable {
     var timestamp: Int64
     var screen: String?
     var properties: [String: PropertyValue]?
+    /// Feature key declared in code (`Union.feature("checkout")`). Allowed on custom events and `$screen_view`.
+    var feature: String?
     var role: FeatureRole?
+
+    init(eventId: String, sessionId: String, name: String, timestamp: Int64, screen: String?, properties: [String: PropertyValue]?, feature: String? = nil, role: FeatureRole?) {
+        self.eventId = eventId
+        self.sessionId = sessionId
+        self.name = name
+        self.timestamp = timestamp
+        self.screen = screen
+        self.properties = properties
+        self.feature = feature
+        self.role = role
+    }
 
     enum CodingKeys: String, CodingKey {
         case eventId = "event_id"
         case sessionId = "session_id"
-        case name, timestamp, screen, properties, role
+        case name, timestamp, screen, properties, feature, role
     }
 }
 

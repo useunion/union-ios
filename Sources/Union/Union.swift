@@ -6,6 +6,10 @@ import Foundation
 /// ```swift
 /// Union.configure(writeKey: "av_…", privacyMode: .productAnalytics)
 /// Union.track("workout_started", properties: ["plan": "strength", "minutes": 30], role: .start)
+///
+/// let checkout = Union.feature("checkout")      // declares the feature; the server creates it
+/// checkout.start("checkout_started")
+/// checkout.success("order_placed")
 /// ```
 public enum Union {
     private static let lock = NSLock()
@@ -23,15 +27,29 @@ public enum Union {
     }
 
     /// Custom event. `name` must be lowercase snake_case (`workout_started`); `$`-prefixed names are reserved.
-    public static func track(_ name: String, properties: [String: PropertyValue] = [:], role: FeatureRole? = nil, screen: String? = nil) {
+    /// `feature` + `role` declare the event's place in a feature — see `Union.feature(_:)` for the typed form.
+    public static func track(_ name: String, properties: [String: PropertyValue] = [:], feature: String? = nil, role: FeatureRole? = nil, screen: String? = nil) {
         guard let p = shared?.pipeline else { return }
-        Task { await p.track(name: name, properties: properties, role: role, screen: screen) }
+        Task { await p.track(name: name, properties: properties, feature: feature, role: role, screen: screen) }
     }
 
     /// Manual `$screen_view`. Use `.trackScreen(_:)` in SwiftUI or `Options.automaticScreenTracking` in UIKit.
-    public static func screen(_ name: String, properties: [String: PropertyValue] = [:]) {
+    /// With `feature`, the view is that feature's discovery step.
+    public static func screen(_ name: String, properties: [String: PropertyValue] = [:], feature: String? = nil) {
         guard let p = shared?.pipeline else { return }
-        Task { await p.screen(name: name, properties: properties) }
+        Task { await p.screen(name: name, properties: properties, feature: feature) }
+    }
+
+    /// A typed handle for one feature: `Union.feature("checkout").success("order_placed")`. The key is
+    /// validated here so a bad one is logged once, not on every event; events through a bad handle are
+    /// dropped (see `Feature`).
+    public static func feature(_ key: String) -> Feature {
+        if let client = shared {
+            do { try Validation.validate(featureKey: key) } catch {
+                client.logger.log(.warning, "feature handle \"\(key)\" will drop its events: \(error)")
+            }
+        }
+        return Feature(key: key)
     }
 
     /// Attach your own user id after login, optionally with traits describing the person —

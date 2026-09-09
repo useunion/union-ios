@@ -39,6 +39,27 @@ its own App Privacy answers, which the SDK cannot do on its behalf.
 
 Event names: lowercase `snake_case`, max 64 chars. Properties: up to 32 keys; strings ≤ 256 chars, finite numbers, booleans. Invalid events are logged and dropped — the SDK never throws or crashes your app.
 
+## Features
+
+Declare a feature where its events are sent, and the funnel builds itself:
+
+```swift
+let checkout = Union.feature("checkout")
+checkout.screen("Checkout")                                   // discovery — saw the screen
+checkout.start("checkout_started")
+checkout.use("shipping_selected")
+checkout.success("order_placed", properties: ["total": 49.9])
+checkout.failure("payment_failed")
+```
+
+A declaration is a definition, not a hint. From production and TestFlight builds the server creates the
+feature (or adds the new events to one the panel already has) — no inbox step — and the panel refines
+it: rename it, set an owner, add events. Edits made in the panel are kept on later syncs. Development
+builds only pre-fill the panel's editor, so experimenting with names does not create features. A typo
+in the key creates a second feature; it shows up as "Declared in code" with its key and is fixed by
+archiving. Keys follow the event-name rules (`snake_case`, max 64 chars). `Union.track(_:feature:role:)`
+is the same thing without the handle.
+
 ## Crashes, hangs and non-fatals
 
 On by default. `configure` installs the handlers — signals, mach exceptions, `NSException` — and a

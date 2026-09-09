@@ -12,7 +12,8 @@ public enum PrivacyMode: String, Codable, Sendable {
     case productAnalytics = "product_analytics"
 }
 
-/// Optional hint about the event's role inside a feature. The panel remains the source of truth.
+/// The event's role inside a feature, declared in code together with a feature key (`Union.feature(_:)`).
+/// The server creates or extends the feature from it; the panel refines it. Without a key it only pre-fills the editor.
 public enum FeatureRole: String, Codable, Sendable {
     case discovery, start, use, success, failure
 }
@@ -106,6 +107,6 @@ enum SDKInfo {
     /// every batch, so it is the only way to tell a build that *can* send crashes from one that
     /// cannot. Without it, "this build reports no crashes" and "this build has no crash handler" are
     /// the same sentence in the panel.
-    static let version = "0.2.0"
+    static let version = "0.3.0"
     static let contractVersion = 1
 }

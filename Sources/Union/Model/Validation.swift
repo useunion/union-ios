@@ -14,6 +14,8 @@ enum Limits {
     static let propertyStringMaxLength = 256
     static let screenNameMaxLength = 128
     static let userIdMaxLength = 128
+    static let featureKeyMaxLength = 64
+    static let featureKeyPattern = "^[a-z][a-z0-9_]*$"
 }
 
 enum ValidationError: Error, CustomStringConvertible, Equatable {
@@ -24,6 +26,7 @@ enum ValidationError: Error, CustomStringConvertible, Equatable {
     case propertyTooLong(String)
     case nonFiniteNumber(String)
     case screenTooLong
+    case invalidFeatureKey(String)
     case userIdTooLong
     case tooManyTraits(Int)
     case invalidTraitKey(String)
@@ -38,6 +41,7 @@ enum ValidationError: Error, CustomStringConvertible, Equatable {
         case .propertyTooLong(let k): return "property \"\(k)\" exceeds \(Limits.propertyStringMaxLength) chars"
         case .nonFiniteNumber(let k): return "property \"\(k)\" is not a finite number"
         case .screenTooLong: return "screen name exceeds \(Limits.screenNameMaxLength) chars"
+        case .invalidFeatureKey(let k): return "feature key \"\(k)\" must be lowercase snake_case starting with a letter, max \(Limits.featureKeyMaxLength) chars"
         case .userIdTooLong: return "user id exceeds \(Limits.userIdMaxLength) chars"
         case .tooManyTraits(let n): return "\(n) traits, max \(Limits.maxTraits)"
         case .invalidTraitKey(let k): return "trait key \"\(k)\" must be 1–\(Limits.traitKeyMaxLength) chars"
@@ -54,6 +58,16 @@ enum Validation {
         guard name.count <= Limits.eventNameMaxLength,
               nameRegex.firstMatch(in: name, range: NSRange(name.startIndex..., in: name)) != nil
         else { throw ValidationError.invalidName(name) }
+    }
+
+    private static let featureKeyRegex = try! NSRegularExpression(pattern: Limits.featureKeyPattern)
+
+    /// A feature key shares the event-name alphabet. `nil` is fine — most events belong to no feature.
+    static func validate(featureKey: String?) throws {
+        guard let key = featureKey else { return }
+        guard key.count <= Limits.featureKeyMaxLength,
+              featureKeyRegex.firstMatch(in: key, range: NSRange(key.startIndex..., in: key)) != nil
+        else { throw ValidationError.invalidFeatureKey(key) }
     }
 
     static func validate(properties: [String: PropertyValue]) throws {

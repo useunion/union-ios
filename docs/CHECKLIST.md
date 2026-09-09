@@ -51,6 +51,31 @@ z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlowa
       których jedyna wartość to zabetonowanie nazwy i klucza właściwości w kompilatorze zamiast
       w tym akapicie. Do zrobienia, gdy pojawi się druga aplikacja emitująca te eventy ręcznie.
 
+## 1b. Deklaracja feature'a i roli
+
+Trzecia rzecz, jaką event może nieść obok nazwy i właściwości: **do którego feature'a należy i w jakiej
+roli**. To nie podpowiedź dla panelu — to definicja. Serwer (repo `Union`, `syncDeclaredFeatures`) tworzy
+z niej feature albo dorzuca brakujące role do istniejącego, bez skrzynki sugestii. Dlatego pomyłka tutaj
+nie jest błędem walidacji, tylko drugim feature'em w panelu.
+
+| Element | Co robi SDK | Stan |
+|---|---|---|
+| `feature` na eventcie | opcjonalny klucz (`^[a-z][a-z0-9_]*$`, ≤ 64 — ten sam alfabet co nazwa eventu, `Limits.featureKeyPattern`), przez `Union.track(_:feature:role:)` | [x] |
+| `role` na eventcie | jak dotąd (`discovery/start/use/success/failure`); bez `feature` tylko wypełnia edytor w panelu | [x] |
+| `feature` na `$screen_view` | `Union.screen(_:feature:)` — jedyny event `$…`, który może nieść klucz; SDK dopisuje `role: .discovery`, bo widok ekranu jest pierwszym krokiem leja. Inne `$…` z kluczem serwer odrzuca | [x] |
+| Uchwyt `Union.feature(_:)` | `Feature` — klucz pisany raz, rola wynika z metody (`.screen/.discovery/.start/.use/.success/.failure`). Cienka nakładka na `track`/`screen`; klucz walidowany przy tworzeniu, żeby zły był zalogowany raz, nie per event | [x] |
+| Zły klucz | **porzuca cały event**, nigdy nie wysyła go bez `feature` — event obdarty z feature'a, dla którego został napisany, czyta się po drugiej stronie jako „nie należy do żadnego" | [x] |
+
+Reguły, których nie łamiemy:
+- **Jeden event = jedna para (feature, rola) w kodzie.** Dwie różne pary dla tej samej nazwy to konflikt,
+  który serwer *pokazuje* w skrzynce (`declared_conflict`) i nie rozstrzyga. Nie ma „ostatnia wygrywa".
+- Tworzą wyłącznie buildy `production`/`testflight`. Build `development` tylko wypełnia edytor — można
+  eksperymentować z nazwami bez mnożenia feature'ów.
+- Sync serwera jest addytywny: dorzuca, nigdy nie usuwa ani nie zmienia roli ustawionej w panelu. Zmiana
+  roli w kodzie po tym, jak panel ją poprawił, nic nie zrobi — to celowe.
+- Nazwa feature'a w panelu to na start title-case klucza (`cart_item` → „Cart item"). Ładna nazwa to
+  edycja w panelu, nie drugi klucz.
+
 ## 2. Kontekst urządzenia (raz na paczkę, nie per event)
 
 `DeviceContext`: `app_version`, `app_build`, `sdk_version`, `os_name` (`iOS`), `os_version`, `device_model`, `locale`, `timezone`. Wszystkie obowiązkowe, wszystkie przycięte do limitów z kontraktu. Brak IDFA, brak ATT, brak dokładnej lokalizacji — IP skraca serwer.
@@ -69,9 +94,9 @@ z własnego cyklu życia. Union nie linkuje Survicate i nie ma z czego swizzlowa
 - [x] `optOut()` czyści kolejkę, tożsamość i sesję; `optIn()` przywraca zbieranie
 - [x] `PrivacyInfo.xcprivacy` w paczce (Product Interaction, Device ID, User ID, Other Diagnostic Data; `CA92.1`)
 - [ ] `requestDataDeletion()` to dziś alias `optOut()` — zamienić na realne żądanie, gdy API je wystawi
-- [ ] wystawić `install_id` do odczytu (`Union.installId`), żeby aplikacja mogła podać go Survicate jako
-  trait. Dziś id jest w Keychain i nie ma publicznego gettera, więc styk z sekcji 5 jest niewykonalny
-  bez zmiany w SDK — to jedyna rzecz, która blokuje pełną atrybucję NPS po stronie klienta.
+- [x] `Union.installId` wystawia install id do odczytu (`nil` przed `configure` i w `strictAnonymous`),
+  żeby aplikacja mogła podać go Survicate jako trait — styk z sekcji 5 jest wykonalny po stronie SDK;
+  to aplikacja musi go wywołać.
 - Odpowiedzi z ankiet: do Union jedzie **wyłącznie** fakt zdarzenia i `survey_id`. Nigdy treść
   odpowiedzi, komentarz, score ani kategoria — score i kategorię Union bierze z webhooka Survicate,
   a treści nie bierze wcale. `Union.track("survey_answered", ["comment": …])` byłoby złamaniem tej
@@ -152,7 +177,7 @@ Nowa integracja przechodzi ten sam próg: wiersz w tabeli + odpowiedź na pytani
 
 - [ ] `swift test` przechodzi (host macOS; części UIKit wykompilowane)
 - [ ] test zgodności ze schematem waliduje każdą zakodowaną paczkę względem `event-batch.v1.json`
-- [ ] fixture schematu odświeżony, jeśli kontrakt w repo `Union` się zmienił
+- [ ] fixture schematu odświeżony, jeśli kontrakt w repo `Union` się zmienił (ostatnio: pole `feature` na eventcie)
 - [ ] `README.md` zgadza się z zachowaniem (README to publiczna obietnica)
 - [ ] wiersz w tej checkliście dopisany/zaktualizowany, stan `[x]/[~]/[ ]` prawdziwy
 - [ ] stringi user-facing i logi po angielsku
