@@ -166,4 +166,18 @@ public enum Union {
     public static var installId: String? {
         shared?.identityStore.load().installId
     }
+
+    /// The same install id as a `UUID`, for StoreKit's `Product.PurchaseOption.appAccountToken`.
+    ///
+    /// Apple echoes that token on every App Store Server Notification, which is how Union joins
+    /// a purchase, renewal or refund to the person and the session. The token has to be a UUID:
+    /// Apple accepts a non-UUID value without complaining and it links nothing, and purchases
+    /// made before the token was set cannot be linked afterwards — the token is not something
+    /// we stored. So the type carries that guarantee instead of a paragraph asking every caller
+    /// to convert the string correctly.
+    ///
+    /// `nil` before `configure(…)` and in `strictAnonymous`, exactly like `installId`.
+    public static var installUUID: UUID? {
+        installId.flatMap(UUID.init(uuidString:))
+    }
 }

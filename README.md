@@ -111,6 +111,22 @@ Union.configure(writeKey: "av_…", privacyMode: .productAnalytics, options: o)
 
 Write keys are bound to one environment. Use a separate key per build configuration (development / TestFlight / production); a mismatch is reported once in the log and the batch is dropped.
 
+## Linking purchases
+
+Union joins purchases, renewals and refunds to a person through Apple's `appAccountToken`, which the App Store
+echoes on every server notification. Set it from the install id when you start a purchase:
+
+```swift
+try await product.purchase(options: Union.installUUID.map { [.appAccountToken($0)] } ?? [])
+```
+
+`Union.installUUID` is the install id as a `UUID` — `nil` before `configure(…)` and in `strictAnonymous`. The token
+has to be a UUID: the App Store accepts any other value without complaining and it links nothing. Purchases made
+before you set it cannot be linked afterwards, so set it before your first release that sells anything.
+
+Using RevenueCat instead? Set the subscriber attribute `union_install_id` to `Union.installId`, and call
+`Union.identify(userId:)` with the same id you give RevenueCat as `app_user_id`.
+
 ## Privacy modes
 
 | | `strictAnonymous` | `productAnalytics` |

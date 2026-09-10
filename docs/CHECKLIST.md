@@ -64,6 +64,7 @@ nie jest błędem walidacji, tylko drugim feature'em w panelu.
 | `role` na eventcie | jak dotąd (`discovery/start/use/success/failure`); bez `feature` tylko wypełnia edytor w panelu | [x] |
 | `feature` na `$screen_view` | `Union.screen(_:feature:)` — jedyny event `$…`, który może nieść klucz; SDK dopisuje `role: .discovery`, bo widok ekranu jest pierwszym krokiem leja. Inne `$…` z kluczem serwer odrzuca | [x] |
 | Uchwyt `Union.feature(_:)` | `Feature` — klucz pisany raz, rola wynika z metody (`.screen/.discovery/.start/.use/.success/.failure`). Cienka nakładka na `track`/`screen`; klucz walidowany przy tworzeniu, żeby zły był zalogowany raz, nie per event | [x] |
+| `screen` na dowolnym eventcie | `Union.track(_:screen:)` — opcjonalna nazwa ekranu (≤ 128) obok nazwy eventu; nie emituje `$screen_view` i nie liczy się do `screen_count`, tylko mówi **gdzie** event się stał | [x] |
 | Zły klucz | **porzuca cały event**, nigdy nie wysyła go bez `feature` — event obdarty z feature'a, dla którego został napisany, czyta się po drugiej stronie jako „nie należy do żadnego" | [x] |
 
 Reguły, których nie łamiemy:
@@ -81,6 +82,10 @@ Reguły, których nie łamiemy:
 `DeviceContext`: `app_version`, `app_build`, `sdk_version`, `os_name` (`iOS`), `os_version`, `device_model`, `locale`, `timezone`. Wszystkie obowiązkowe, wszystkie przycięte do limitów z kontraktu. Brak IDFA, brak ATT, brak dokładnej lokalizacji — IP skraca serwer.
 
 - [x] pola wymagane przez kontrakt
+- [x] limity właściwości eventu (`Limits` / `Validation.swift`, ta sama tabela co `packages/contract/src/limits.ts`):
+  ≤ 32 klucze, klucz ≤ 64 znaki i `^[a-z][a-z0-9_]*$`, string ≤ 256 znaków, wartość wyłącznie string /
+  skończona liczba / bool. Przekroczenie **porzuca event**, nigdy nie przycina po cichu — przycięta wartość
+  czyta się po drugiej stronie jak zmierzona.
 - [ ] `device_model` na Apple Silicon w symulatorze zwraca model hosta — udokumentować lub znormalizować
 
 ## 3. Prywatność
@@ -115,8 +120,21 @@ Reguły, których nie łamiemy:
 - [x] paczki ≤ 100 eventów / ≤ 256 KB
 - [x] flush: co 10 s, przy 20 eventach, na wejściu w tło, na `flush()`
 - [x] `202` ack; `400` z `details[].path=events.<i>` usuwa tylko wskazane eventy; `400` bez ścieżek / `privacy_violation` odrzuca paczkę; `401` zatrzymuje SDK na ten launch; `403`/`429` pauza z `Retry-After`; `413` dzieli paczkę; 5xx/sieć → backoff do 5 min
+- [x] `202` niesie `rejected` — ingest ma **zdalny kill switch po nazwie eventu** (`blockedEvents`), więc paczka
+  potwierdzona nie znaczy „wszystko weszło". Eventu nie ponawiamy (to decyzja projektu, nie awaria), ale liczba
+  jedzie do logu: bez niej wyłączona nazwa jest po stronie SDK nieodróżnialna od przyjętej.
+- [x] kod błędu w body jest tym, co rozstrzyga, nie sam status: `invalid_write_key`, `project_disabled`,
+  `unsupported_contract_version`, `invalid_batch`, `batch_too_large`, `quota_exceeded`, `rate_limited`,
+  `privacy_violation` (`packages/contract/src/errors.ts`). Pod jednym `403` stoją dwie różne prawdy —
+  wyłączony projekt i throttle — i tylko jedna z nich ma sens do ponowienia.
 - [ ] niezgodność środowiska klucza wraca jako `invalid_batch` bez `details` — rozpoznajemy po `message`; usunąć, gdy ingest doda `path: "environment"`
+- [ ] lokalny ingest **nie ma portu** pod `wrangler dev` z wieloma configami: repo `Union` wystawia proxy
+  (`DEV_INGEST_PROXY=1`, `POST http://localhost:8789/v1/dev/ingest`). Dopisać jako udokumentowane
+  `Options.endpoint` do testów na urządzeniu, żeby ścieżka „SDK przeciwko lokalnemu Unionowi" nie była folklorem.
 - SDK nigdy nie rzuca i nie ubija hosta: nieprawidłowy event jest logowany i porzucany.
+- `POST /v1/server` (klucze `sk_…`) **nie jest ścieżką SDK** i nie wolno jej tu dodać: to wejście dla backendu
+  klienta, z własnym kontraktem, innym zaufaniem i bez `SessionDO`. Jedyny styk to `Union.installId` podany
+  aplikacji do przekazania na własny serwer.
 
 ## 4a. Crashe, hangi i non-fatale
 
@@ -140,7 +158,11 @@ kto odinstalował, nigdy.
 | Obrazy binarne | snapshot dyld **przy instalacji** (`LC_UUID`, `__TEXT`), bo w handlerze wzięcie locka dyld to deadlock. Konsekwencja jest udokumentowana: biblioteka doładowana później nie ma wpisu, a jej ramki idą z `image: null` | [x] |
 | Stos | własne przejście po łańcuchu frame pointerów (nigdy `backtrace()` — libunwind alokuje i bierze locki), z walidacją każdego kroku; `arm64` przez akcesory pc/lr/fp, żeby nie wysłać adresu z bitami PAC | [x] |
 | Stan urządzenia | próbkowany **przed** crashem (pamięć, dysk, bateria, orientacja, jailbreak) i opisany jako próbka; `uptime_ms` i `in_foreground` czyta sam handler. Każde pole opcjonalne — brak odpowiedzi zostaje brakiem, nigdy zerem | [x] |
+| Ucięty stos | ≤ 128 ramek na wątek i **obowiązkowe** `frames_truncated` na każdym wątku (`CrashAssembly`, `CrashRecord`). Ucięty dump nie może czytać się jak krótki stos — brakująca ramka aplikacji zmienia i tytuł issue, i odcisk | [x] |
 | Wysyłka | `POST /v1/crash`, **gzip wymagany** (kontener składany ręcznie nad `Compression`, bez zależności). Kasujemy raport wyłącznie po 2xx albo po trwałym odrzuceniu (400/413/422); 5xx i błąd sieci **zostawiają plik** | [x] |
+| Limity paczki | ≤ 8 raportów, ≤ 1 MB po gzipie i ≤ 8 MB po rozpakowaniu (ingest capuje odczyt **rozpakowany**: `content-length` przestaje ograniczać pamięć, a gzip bomb to kilobajt na drucie). Duży raport jedzie sam | [x] |
+| `503` | osobne od 5xx z reszty świata: „nie udało się odłożyć tego raportu, ponów" — plik **zostaje**, nie jest ani skasowany, ani policzony jako trwałe odrzucenie | [x] |
+| Dwie wersje, nie jedna | `UNION_CRASH_RECORD_VERSION` (format pliku na dysku, czytany przez **następne** uruchomienie, więc może być starszy niż binarka) jest niezależny od `contract_version` paczki `crash-batch` — a ten jest niezależny od `EventBatch`. Trzy liczby, trzy powody do zmiany | [x] |
 | Retencja lokalna | `Options.maxStoredCrashReports` (16), najstarsze wypadają pierwsze — pętla crashy przy starcie bez sieci nie może zapchać dysku | [x] |
 | `optOut()` | kasuje też katalog crashów, nie tylko kolejkę eventów | [x] |
 | Domyślnie | **włączone** (`Options.crashReporting = true`), po obu stronach: serwerowa bramka `crash_reporting_enabled` też jest domyślnie włączona (migracja 0056 w repo `Union`). Wyłączenie po stronie projektu **nie** zatrzymuje uploadu — zamienia go w zapisaną odmowę (`collection_disabled`), więc nic nie ginie po cichu | [x] |
@@ -165,7 +187,8 @@ Reguły, których nie łamiemy:
 | UIKit | `automaticScreenTracking` — swizzling `viewDidAppear`, kontrolery kontenerowe/systemowe pomijane | [~] |
 | Deep linki | `handleDeepLink(url)` z `onOpenURL` / scene delegate; bez automatycznego przechwytywania | [x] |
 | Środowisko | auto-detekcja: DEBUG → `development`, sandbox receipt → `testflight`, inaczej `production`; nadpisywalne w `Options` | [x] |
-| RevenueCat / revenue | **nic.** Revenue wchodzi webhookiem RC → `apps/ingest`, nie przez SDK. Jedyny styk: `Union.identify(userId:)` musi używać tego samego id co RC `app_user_id`, żeby atrybucja instalacji zadziałała | [x] |
+| App Store Server Notifications | **jeden styk, i bez niego atrybucji nie ma.** Aplikacja ustawia `Product.PurchaseOption.appAccountToken = Union.installUUID` przy zakupie; Apple odbija ten token na każdej notyfikacji i po nim Union łączy zakup/odnowienie/refund z osobą i sesją. Token nie-UUID **nie linkuje nic i nie zgłasza tego**, a zakupów sprzed jego ustawienia nie da się połączyć wstecz — tokenu nie zapisywaliśmy. SDK daje typ (`Union.installUUID: UUID?`, `nil` przed `configure` i w `strictAnonymous`) i snippet w README; nie importuje StoreKit i nie owija zakupu | [x] |
+| RevenueCat | **nic w hot pathu.** Revenue wchodzi webhookiem RC → `apps/ingest`. Dwa styki po stronie aplikacji: atrybut subskrybenta `union_install_id` = `Union.installId` (pierwsza ścieżka wiązania) i `Union.identify(userId:)` tym samym id co RC `app_user_id` (druga). RC jest właścicielem liczb wyłącznie w projekcie **bez** ASSN | [x] |
 | Survicate / NPS | **prawie nic, ale dwa styki.** Odpowiedzi wchodzą webhookiem Survicate → `apps/ingest`; SDK nie czyta ankiet i nie wysyła odpowiedzi. Styk pierwszy: aplikacja ustawia `SurvicateSdk.shared.setUserTrait(UserTrait(withName: "union_install_id", value: <install_id>))`, żeby odpowiedź trafiła na profil osoby — bez tego Union próbuje dopasować po `user_id`, a w ostatniej kolejności pyta Data Export API. Styk drugi: eventy z sekcji 1a. Treści odpowiedzi Union nie przyjmuje w żadnej formie | [ ] |
 | Push / notyfikacje | poza MVP | [ ] |
 | Crash reporting | **własne, zaimplementowane** — patrz sekcja 4a. Kontrakt to `crash-batch.v1.json`, nie `EventBatch` | [x] |

@@ -378,6 +378,18 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(installId, store.load().installId, "and it is stable across reads")
     }
 
+    /// `Union.installUUID` is `installId` parsed as a `UUID`, and StoreKit's
+    /// `appAccountToken` only links a purchase when it really is one — Apple accepts any
+    /// other string and joins nothing. So the minted id has to stay UUID-shaped.
+    func testMintedInstallIdParsesAsAUuidForAppAccountToken() async {
+        let store = InMemoryIdentityStore()
+        _ = Fixtures.pipeline(identity: store)
+
+        let installId = store.load().installId
+        XCTAssertNotNil(installId.flatMap(UUID.init(uuidString:)),
+                        "appAccountToken must be a UUID; a non-UUID token links nothing and says nothing")
+    }
+
     func testStrictAnonymousExposesNoInstallId() async {
         let store = InMemoryIdentityStore()
         store.save(Identity(installId: UUIDv7.generate(), userId: nil, traits: nil))
