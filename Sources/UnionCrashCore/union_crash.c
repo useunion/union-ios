@@ -122,9 +122,9 @@ static void union_crash_put_i64(union_crash_writer *w, int64_t v) { union_crash_
  * unmapped page instead of raising a second fault inside the first one.
  */
 static int union_crash_read(uint64_t address, void *out, size_t size) {
-    mach_vm_size_t read = 0;
-    kern_return_t kr = mach_vm_read_overwrite(mach_task_self(), (mach_vm_address_t)address,
-                                              (mach_vm_size_t)size, (mach_vm_address_t)out, &read);
+    vm_size_t read = 0;
+    kern_return_t kr = vm_read_overwrite(mach_task_self(), (vm_address_t)address,
+                                         (vm_size_t)size, (vm_address_t)out, &read);
     return (kr == KERN_SUCCESS && read == size) ? 0 : -1;
 }
 
