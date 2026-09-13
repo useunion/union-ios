@@ -61,7 +61,21 @@ actor EventPipeline {
 
     private let kv: KeyValueStore
 
-    func attach(crash: CrashReporter?) { self.crash = crash }
+    func attach(crash: CrashReporter?) {
+        self.crash = crash
+        let id = session.current?.sessionId
+        crashSessionId = id
+        crash?.setSessionId(id)
+    }
+
+    /** Stops timers and detaches process-wide crash state when a new `Client` replaces this one. */
+    func shutdown() {
+        stopped = true
+        timer?.cancel()
+        timer = nil
+        crash = nil
+        crashSessionId = nil
+    }
 
     // MARK: - Lifecycle entry points (called by Client / AppLifecycleObserver)
 
@@ -364,6 +378,7 @@ actor EventPipeline {
     // Test hooks
     var queuedEvents: [Event] { queue }
     var currentSessionId: String? { session.current?.sessionId }
+    var currentCrashSessionId: String? { crashSessionId }
     var currentIdentity: Identity { identity }
     var isStopped: Bool { stopped }
     var isPaused: Bool { (pausedUntil ?? .distantPast) > clock.now }

@@ -53,10 +53,14 @@ final class Client: Sendable {
         logger.log(.info, "configured · env=\(environment.rawValue) · privacy=\(privacyMode.rawValue) · sdk=\(SDKInfo.version) · crashes=\(options.crashReporting ? "on" : "off")")
         let p = pipeline
         if let reporter {
-            Task { await p.attach(crash: reporter) }
             reporter.start(sessionId: nil)
+            Task {
+                await p.attach(crash: reporter)
+                await p.start(hadPersistentIdentity: hadIdentity)
+            }
+        } else {
+            Task { await p.start(hadPersistentIdentity: hadIdentity) }
         }
-        Task { await p.start(hadPersistentIdentity: hadIdentity) }
         #if canImport(UIKit) && !os(watchOS)
         let auto = options.automaticScreenTracking
         Task { @MainActor in
@@ -64,6 +68,12 @@ final class Client: Sendable {
             if auto { AutomaticScreenTracking.install() }
         }
         #endif
+    }
+
+    func shutdown() {
+        crash?.stop()
+        let p = pipeline
+        Task { await p.shutdown() }
     }
 
     private static func makeCrashReporter(writeKey: String,

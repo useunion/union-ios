@@ -204,25 +204,8 @@ static int union_crash_walk(thread_t thread, uint64_t *frames, int max, int *tru
 
 static void union_crash_thread_name(thread_t thread, char *out, size_t size) {
     memset(out, 0, size);
-    /*
-     * The dispatch queue label, read out of the thread's identifier info. `pthread_getname_np` needs
-     * a pthread_t, and mapping a mach thread back to one is not something a handler may do.
-     */
-    thread_identifier_info_data_t info;
-    mach_msg_type_number_t count = THREAD_IDENTIFIER_INFO_COUNT;
-    if (thread_info(thread, THREAD_IDENTIFIER_INFO, (thread_info_t)&info, &count) != KERN_SUCCESS) return;
-    if (info.thread_handle == 0) return;
-    struct {
-        uint64_t label_ptr;
-    } queue;
-    if (union_crash_read((uint64_t)info.dispatch_qaddr, &queue, sizeof(queue)) != 0) return;
-    if (queue.label_ptr == 0) return;
-    char raw[UNION_CRASH_THREAD_NAME];
-    if (union_crash_read(queue.label_ptr, raw, sizeof(raw)) != 0) return;
-    raw[sizeof(raw) - 1] = 0;
-    size_t n = strnlen(raw, sizeof(raw) - 1);
-    if (n >= size) n = size - 1;
-    memcpy(out, raw, n);
+    (void)thread;
+    /* Mach exposes a private dispatch_qaddr layout, not a stable C string. Leave unknown names empty. */
 }
 
 /* ------------------------------------------------------------------- record --- */

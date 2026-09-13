@@ -325,7 +325,8 @@ final class CrashReporter: @unchecked Sendable {
             exception: CrashExceptionWire(type: "MainThreadHang", reason: nil),
             hangDurationMs: Int(duration * 1000),
             images: sidecar.images,
-            threads: CrashAssembly.threads(record: record, images: sidecar.images),
+            threads: CrashAssembly.threads(record: record, images: sidecar.images,
+                                           crashedThreadName: "com.apple.main-thread"),
             breadcrumbs: CrashAssembly.breadcrumbs(record.crumbs),
             customKeys: sidecar.customKeys
         )

@@ -2,6 +2,18 @@ import XCTest
 @testable import Union
 
 final class PipelineTests: XCTestCase {
+    func testAttachingCrashContextAdoptsAnAlreadyContinuedSession() async {
+        let kv = InMemoryKeyValueStore()
+        let first = Fixtures.pipeline(kv: kv)
+        await first.start(hadPersistentIdentity: false)
+        let session = await first.currentSessionId
+
+        let continued = Fixtures.pipeline(kv: kv)
+        await continued.attach(crash: nil)
+        let continuedCrashSessionId = await continued.currentCrashSessionId
+        XCTAssertEqual(continuedCrashSessionId, session)
+    }
+
     func testColdStartEmitsInstallAndSessionStartAndBatchConformsToSchema() async throws {
         let transport = StubTransport()
         let p = Fixtures.pipeline(transport: transport)

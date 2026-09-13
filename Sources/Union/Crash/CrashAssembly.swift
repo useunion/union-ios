@@ -45,12 +45,12 @@ enum CrashAssembly {
         )
     }
 
-    static func threads(record: CrashRecord, images: [BinaryImageWire]) -> [CrashThreadWire] {
+    static func threads(record: CrashRecord, images: [BinaryImageWire], crashedThreadName: String? = nil) -> [CrashThreadWire] {
         let index = ImageIndex(images)
         return record.threads.prefix(CrashLimits.maxThreads).map { thread in
             CrashThreadWire(
                 index: thread.index,
-                name: thread.name,
+                name: thread.crashed ? (crashedThreadName ?? thread.name) : thread.name,
                 crashed: thread.crashed,
                 frames: thread.frames.prefix(CrashLimits.maxFramesPerThread).enumerated().map { position, addr in
                     let found = index.image(containing: addr)

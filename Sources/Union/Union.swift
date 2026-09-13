@@ -22,8 +22,10 @@ public enum Union {
 
     /// Creates the SDK. Calling twice replaces the previous client (useful in tests / logout flows).
     public static func configure(writeKey: String, privacyMode: PrivacyMode, options: Options = Options()) {
-        let c = Client(writeKey: writeKey, privacyMode: privacyMode, options: options)
-        lock.lock(); client = c; lock.unlock()
+        lock.lock()
+        client?.shutdown()
+        client = Client(writeKey: writeKey, privacyMode: privacyMode, options: options)
+        lock.unlock()
     }
 
     /// Custom event. `name` must be lowercase snake_case (`workout_started`); `$`-prefixed names are reserved.

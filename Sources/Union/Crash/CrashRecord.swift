@@ -88,11 +88,17 @@ struct CrashRecord: Sendable, Equatable {
                 guard let frame: UInt64 = reader.read() else { break }
                 frames.append(frame)
             }
-            let name = String(cString: Array(nameBytes) + [0])
+            let rawName = nameBytes.prefix { $0 != 0 }
+            let decoded = String(bytes: rawName, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = decoded.flatMap { value in
+                value.isEmpty || value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+                    ? nil
+                    : value
+            }
             threads.append(Thread(index: Int(index),
                                   crashed: crashed == 1,
                                   framesTruncated: truncated == 1,
-                                  name: name.isEmpty ? nil : name,
+                                  name: name,
                                   frames: frames))
         }
         /*
