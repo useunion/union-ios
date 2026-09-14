@@ -15,7 +15,7 @@ actor EventPipeline {
     private let config: PipelineConfig
     private let store: EventStore
     private let transport: Transport
-    private let identityStore: IdentityStore
+    private let identityStore: IdentityCoordinator
     private let clock: Clock
     private let logger: SDKLogger
     private let device: DeviceContext
@@ -36,32 +36,43 @@ actor EventPipeline {
     /// would put a disk write in front of every `track`.
     private var crashSessionId: String?
 
-    init(config: PipelineConfig, store: EventStore, transport: Transport, identityStore: IdentityStore, kv: KeyValueStore, clock: Clock, logger: SDKLogger, device: DeviceContext) {
+    /**
+     * Nothing here touches the Keychain or the disk, and that is the point.
+     *
+     * An actor's `init` is not isolated: it runs on the caller, which for this type is `Client.init`
+     * on the main thread at launch. Loading the identity (Keychain IPC) and the event queue (a file
+     * read and a JSON decode per line) from here put both in front of `didFinishLaunching`. They
+     * moved to `ensurePrepared`, which runs on the actor — that is, off the main thread — and is
+     * called by every entry point rather than by one of them, so there is no ordering to get wrong
+     * and no first call that can see an unloaded queue.
+     */
+    init(config: PipelineConfig, store: EventStore, transport: Transport, identity: IdentityCoordinator, kv: KeyValueStore, clock: Clock, logger: SDKLogger, device: DeviceContext) {
         self.config = config
         self.store = store
         self.transport = transport
-        self.identityStore = identityStore
+        self.identityStore = identity
         self.clock = clock
         self.logger = logger
         self.device = device
         self.session = SessionManager(clock: clock, store: kv)
         self.optedOut = kv.string(forKey: "opt_out") == "1"
         self.kv = kv
-        var id = identityStore.load()
-        if config.privacyMode == .strictAnonymous {
-            identityStore.wipe()
-            id = .anonymous
-        } else if id.installId == nil {
-            id.installId = UUIDv7.generate(now: clock.now)
-            identityStore.save(id)
-        }
-        self.identity = id
-        self.queue = (try? store.load()) ?? []
+        self.identity = .anonymous
     }
 
     private let kv: KeyValueStore
+    private var prepared = false
+
+    /// Idempotent, actor-isolated, and called first by every entry point below.
+    private func ensurePrepared() {
+        guard !prepared else { return }
+        prepared = true
+        identity = identityStore.ensure(now: clock.now)
+        queue = (try? store.load()) ?? []
+    }
 
     func attach(crash: CrashReporter?) {
+        ensurePrepared()
         self.crash = crash
         let id = session.current?.sessionId
         crashSessionId = id
@@ -80,9 +91,13 @@ actor EventPipeline {
     // MARK: - Lifecycle entry points (called by Client / AppLifecycleObserver)
 
     /// Cold start: install/update detection, then session start.
-    func start(hadPersistentIdentity: Bool) {
+    /// `hadPersistentIdentity` is the caller's answer when it has one (tests do); `nil` means the
+    /// coordinator's, which is the only one that can be right now that the load happens here.
+    func start(hadPersistentIdentity: Bool? = nil) {
+        ensurePrepared()
         guard !optedOut else { return }
-        let outcome = InstallState.evaluate(store: kv, device: device, hadPersistentIdentity: hadPersistentIdentity)
+        let outcome = InstallState.evaluate(store: kv, device: device,
+                                            hadPersistentIdentity: hadPersistentIdentity ?? identityStore.hadPersistentIdentity)
         let t = session.touch()
         let sid: String
         var pre: [Event] = []
@@ -107,6 +122,7 @@ actor EventPipeline {
     }
 
     func didEnterBackground() async {
+        ensurePrepared()
         guard !optedOut else { return }
         if case .continued(let sid) = session.touch() { push(system(.background, sessionId: sid)) }
         timer?.cancel(); timer = nil
@@ -114,6 +130,7 @@ actor EventPipeline {
     }
 
     func willEnterForeground() {
+        ensurePrepared()
         guard !optedOut else { return }
         switch session.touch() {
         case .continued(let sid): push(system(.foreground, sessionId: sid))
@@ -126,6 +143,7 @@ actor EventPipeline {
     }
 
     func willTerminate() async {
+        ensurePrepared()
         guard !optedOut, let cur = session.current else { return }
         push(system(.sessionEnd, sessionId: cur.sessionId))
         await flush()
@@ -136,6 +154,7 @@ actor EventPipeline {
     /// An invalid feature key drops the whole event rather than sending it without the key: an event
     /// stripped of the feature it was written for would read on the server as "part of no feature".
     func track(name: String, properties: [String: PropertyValue], feature: String? = nil, role: FeatureRole?, screen: String?) {
+        ensurePrepared()
         guard !optedOut, !stopped else { return }
         do {
             try Validation.validateCustomName(name)
@@ -153,6 +172,7 @@ actor EventPipeline {
 
     /// `feature` makes this screen view the feature's discovery step (`role` is implied on the server).
     func screen(name: String, properties: [String: PropertyValue], feature: String? = nil) {
+        ensurePrepared()
         guard !optedOut, !stopped else { return }
         do {
             try Validation.validate(screen: name)
@@ -172,6 +192,7 @@ actor EventPipeline {
     }
 
     func deepLink(_ url: URL) {
+        ensurePrepared()
         guard !optedOut, !stopped else { return }
         var props: [String: PropertyValue] = [:]
         if let s = url.scheme { props["url_scheme"] = .string(String(s.prefix(Limits.propertyStringMaxLength))) }
@@ -182,6 +203,7 @@ actor EventPipeline {
     }
 
     func identify(userId: String, traits: [String: String] = [:]) {
+        ensurePrepared()
         guard !optedOut else { return }
         guard config.privacyMode == .productAnalytics else {
             logger.log(.warning, "identify() ignored: project is strict_anonymous")
@@ -209,6 +231,7 @@ actor EventPipeline {
     /// launch before their own auth has restored, and rotating there would split the first session in two. In
     /// strict_anonymous there is never a user id and the session *is* the identity, so it always rotates.
     func reset() {
+        ensurePrepared()
         guard identity.userId != nil || config.privacyMode == .strictAnonymous else { return }
         identity.userId = nil
         identity.traits = nil
@@ -221,6 +244,7 @@ actor EventPipeline {
 
     /// Stops collection, wipes queue, identity and session state, persists the flag.
     func optOut() {
+        ensurePrepared()
         optedOut = true
         kv.set("1", forKey: "opt_out")
         queue.removeAll()
@@ -240,18 +264,17 @@ actor EventPipeline {
         guard optedOut else { return }
         optedOut = false
         kv.set(nil, forKey: "opt_out")
-        var id = identityStore.load()
-        if config.privacyMode == .productAnalytics, id.installId == nil {
-            id.installId = UUIDv7.generate(now: clock.now)
-            identityStore.save(id)
-        }
-        identity = id
+        // `optOut` wiped the identity, so the cache holds the empty one: the id has to be minted
+        // again rather than read back.
+        identityStore.forget()
+        identity = identityStore.ensure(now: clock.now)
         start(hadPersistentIdentity: false)
     }
 
     // MARK: - Flush
 
     func flush() async {
+        ensurePrepared()
         guard !flushing, !stopped, !optedOut else { return }
         if let until = pausedUntil, until > clock.now { return }
         flushing = true

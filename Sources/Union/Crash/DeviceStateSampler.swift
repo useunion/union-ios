@@ -12,14 +12,41 @@ import os
 /// the server makes against `COALESCE(col, 0)`: a device that did not report free memory did not
 /// report having none, and a crash rendered as "0 bytes free" would send someone hunting a memory
 /// bug that the data never claimed.
+/// Split in two, by **what the field costs to read**, not by what it describes.
+///
+/// `interfaceSample` is UIKit and two `ProcessInfo` properties: main-thread-only, and cheap enough to
+/// take on whatever thread asked. `systemSample` is the filesystem — a volume-capacity stat and the
+/// jailbreak probe, which stats six paths and attempts a write outside the sandbox. Those ran on the
+/// main thread on every foreground transition and every five-second resample, which is the same
+/// mistake as the sidecar write that produced a `MainThreadHang`, in a place nobody would look for
+/// a file operation.
 enum DeviceStateSampler {
+    /// Everything, for a caller already off the main thread. `interfaceSample` returns nothing from
+    /// UIKit there, which is the documented behaviour above and not a new loss.
     static func sample() -> DeviceStateWire {
+        merged(interface: interfaceSample(), system: systemSample())
+    }
+
+    /// The filesystem half. Safe anywhere, and belongs nowhere near the main thread.
+    static func systemSample() -> DeviceStateWire {
+        var state = DeviceStateWire()
+        state.freeDiskBytes = availableDisk()
+        state.jailbroken = isJailbroken
+        return state
+    }
+
+    static func merged(interface: DeviceStateWire, system: DeviceStateWire) -> DeviceStateWire {
+        var out = interface
+        out.freeDiskBytes = system.freeDiskBytes
+        out.jailbroken = system.jailbroken
+        return out
+    }
+
+    static func interfaceSample() -> DeviceStateWire {
         var state = DeviceStateWire()
         state.totalMemoryBytes = Int(ProcessInfo.processInfo.physicalMemory)
         state.freeMemoryBytes = availableMemory()
-        state.freeDiskBytes = availableDisk()
         state.lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
-        state.jailbroken = jailbroken()
 
         #if canImport(UIKit) && !os(watchOS)
         // Both of these are main-thread-only. Off the main thread they are left absent rather than
@@ -70,6 +97,11 @@ enum DeviceStateSampler {
         else { return nil }
         return Int(capacity)
     }
+
+    /// Answered once per process. The device is not jailbroken between one foreground and the next,
+    /// and the check is six `stat`s and a write attempt — re-running it per sample paid that price
+    /// for an answer that cannot have changed.
+    static let isJailbroken: Bool? = jailbroken()
 
     /**
      * A jailbreak check, and the reason it is a tri-state.

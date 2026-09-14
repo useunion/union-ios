@@ -378,15 +378,19 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(transport.sent[0].identity.traits, ["email": "ada@example.com"])
     }
 
-    /// `Union.installId` reads straight from the identity store, so these two cases are
-    /// the whole contract of that accessor: a real store hands back the minted id, and
-    /// `strictAnonymous` has nothing to hand back.
+    /// `Union.installId` reads through `IdentityCoordinator`, so these two cases are the whole
+    /// contract of that accessor: a real store hands back the minted id, and `strictAnonymous` has
+    /// nothing to hand back. The mint happens on **first use** rather than in `init` — a Keychain
+    /// read and write in `Client.init` is a Keychain read and write on the main thread at launch —
+    /// so the pipeline is started here to stand for that first use, exactly as the facade's own
+    /// `ensure` does for an app that asks before anything else has.
     func testIdentityStoreExposesTheMintedInstallIdForServerEvents() async {
         let store = InMemoryIdentityStore()
-        _ = Fixtures.pipeline(identity: store)
+        let p = Fixtures.pipeline(identity: store)
+        await p.start()
 
         let installId = store.load().installId
-        XCTAssertNotNil(installId, "the id a backend needs for /v1/server is minted during init")
+        XCTAssertNotNil(installId, "the id a backend needs for /v1/server is minted on first use")
         XCTAssertEqual(installId, store.load().installId, "and it is stable across reads")
     }
 
@@ -395,7 +399,8 @@ final class PipelineTests: XCTestCase {
     /// other string and joins nothing. So the minted id has to stay UUID-shaped.
     func testMintedInstallIdParsesAsAUuidForAppAccountToken() async {
         let store = InMemoryIdentityStore()
-        _ = Fixtures.pipeline(identity: store)
+        let p = Fixtures.pipeline(identity: store)
+        await p.start()
 
         let installId = store.load().installId
         XCTAssertNotNil(installId.flatMap(UUID.init(uuidString:)),
@@ -409,6 +414,37 @@ final class PipelineTests: XCTestCase {
         _ = Fixtures.pipeline(privacy: .strictAnonymous, identity: store)
 
         XCTAssertNil(store.load().installId, "strict_anonymous wipes identity, so there is no id to forward")
+    }
+
+    /**
+     * Constructing the SDK must not touch the Keychain or the disk.
+     *
+     * `Client.init` runs on the main thread from `didFinishLaunching`, and an actor's `init` is not
+     * isolated, so anything `EventPipeline.init` did ran there too: a Keychain read (IPC to
+     * `securityd`), a mint's read-plus-write, and a full read and JSON decode of the event queue.
+     * This is the assertion that keeps them out of it.
+     */
+    func testConstructingThePipelineTouchesNoStorage() async {
+        let store = CountingIdentityStore()
+        let p = Fixtures.pipeline(identity: store)
+        XCTAssertEqual(store.loads, 0, "the identity was read while the app was still launching")
+        XCTAssertEqual(store.saves, 0, "the install id was minted while the app was still launching")
+
+        await p.start()
+        XCTAssertEqual(store.loads, 1, "and it is read once, on first use")
+        XCTAssertEqual(store.saves, 1)
+    }
+
+    /// The coordinator caches, so `Union.installId` — which apps may read per view — costs one
+    /// Keychain round trip for the life of the process, not one per call.
+    func testTheInstallIdIsReadFromTheKeychainOnlyOnce() {
+        let store = CountingIdentityStore()
+        let identity = IdentityCoordinator(store: store, privacyMode: .productAnalytics)
+        let first = identity.ensure(now: Date()).installId
+        for _ in 0..<10 { _ = identity.ensure(now: Date()).installId }
+        XCTAssertNotNil(first)
+        XCTAssertEqual(identity.ensure(now: Date()).installId, first, "and the answer is stable")
+        XCTAssertEqual(store.loads, 1)
     }
 
     func testBatcherRespectsLimits() {

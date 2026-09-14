@@ -45,7 +45,7 @@ enum Fixtures {
     static func pipeline(clock: TestClock = TestClock(), transport: StubTransport = StubTransport(), privacy: PrivacyMode = .productAnalytics, flushAt: Int = 100, kv: KeyValueStore = InMemoryKeyValueStore(), identity: IdentityStore = InMemoryIdentityStore()) -> EventPipeline {
         EventPipeline(
             config: PipelineConfig(writeKey: "test", environment: .production, privacyMode: privacy, flushAt: flushAt, flushInterval: 3600, maxQueuedEvents: 50),
-            store: InMemoryEventStore(), transport: transport, identityStore: identity, kv: kv, clock: clock,
+            store: InMemoryEventStore(), transport: transport, identity: IdentityCoordinator(store: identity, privacyMode: privacy), kv: kv, clock: clock,
             logger: SDKLogger(level: .none, handler: nil), device: device
         )
     }
@@ -59,4 +59,26 @@ enum Fixtures {
         let url = Bundle.module.url(forResource: "event-batch.v1", withExtension: "json", subdirectory: "Fixtures")!
         return try Data(contentsOf: url)
     }
+}
+
+/// Counts what it is asked for, so a test can assert that nothing asked during construction.
+final class CountingIdentityStore: IdentityStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var identity = Identity()
+    private(set) var loads = 0
+    private(set) var saves = 0
+
+    func load() -> Identity {
+        lock.lock(); defer { lock.unlock() }
+        loads += 1
+        return identity
+    }
+
+    func save(_ identity: Identity) {
+        lock.lock(); defer { lock.unlock() }
+        saves += 1
+        self.identity = identity
+    }
+
+    func wipe() { save(Identity()) }
 }

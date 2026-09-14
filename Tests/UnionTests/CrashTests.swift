@@ -22,6 +22,64 @@ final class CrashTests: XCTestCase {
         try? FileManager.default.removeItem(at: directory)
     }
 
+    // MARK: - Concurrency
+
+    /**
+     * The sidecar is written from several threads at once.
+     *
+     * `persistContext` is reached from `setForeground` on the main thread (from
+     * `AppLifecycleObserver.init`), from `breadcrumb` on whichever thread the app reports on, and
+     * from `start` — all writing the same path for `currentId`. This hammers that door: it must
+     * finish, and the file left behind must be a whole sidecar rather than one atomic replacement
+     * half-overtaken by another.
+     */
+    func testTheSidecarSurvivesConcurrentWriters() throws {
+        let context = DeviceContext(appVersion: "1.0", appBuild: "1", sdkVersion: SDKInfo.version,
+                                    osVersion: "18.0", deviceModel: "iPhone", locale: "en_US",
+                                    timezone: "UTC")
+        let id = "concurrent"
+        DispatchQueue.concurrentPerform(iterations: 200) { i in
+            let file = CrashContextFile(sessionId: "s-\(i)", context: context,
+                                        state: DeviceStateSampler.sample(),
+                                        customKeys: ["k": String(repeating: "v", count: i + 1)],
+                                        sampledAt: Int64(i))
+            try? self.store.writeContext(file, id: id)
+        }
+        let loaded = try XCTUnwrap(store.loadSidecar(id: id))
+        XCTAssertEqual(loaded.context, context)
+        XCTAssertNotNil(loaded.sessionId)
+    }
+
+    /**
+     * The sidecar write must not happen on the thread that asked for it.
+     *
+     * `AppLifecycleObserver.init` calls `setForeground` on the main actor during launch, and when
+     * that encoded and wrote the file inline it produced a `MainThreadHang` whose blocked stack named
+     * `CrashStore.writeContext`. `DispatchQueue.async` never runs its block inline, so "the file is
+     * still absent when the call returns" is a deterministic statement about where the work went —
+     * and it must then appear without anyone draining anything.
+     */
+    func testTheSidecarIsNotWrittenOnTheCallersThread() throws {
+        let reporter = CrashReporter(config: config(privacy: .productAnalytics), store: store,
+                                     transport: RecordingCrashTransport(), identityStore: InMemoryIdentityStore(),
+                                     device: Fixtures.device, logger: SDKLogger(level: .none, handler: nil),
+                                     clock: TestClock())
+        func sidecars() -> [URL] {
+            ((try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.pathExtension == "json" }
+        }
+
+        reporter.setForeground(true)
+        XCTAssertTrue(sidecars().isEmpty, "the caller waited on the disk write")
+
+        let written = XCTestExpectation(description: "sidecar written")
+        DispatchQueue.global().async {
+            while sidecars().isEmpty { usleep(1000) }
+            written.fulfill()
+        }
+        wait(for: [written], timeout: 5)
+    }
+
     // MARK: - The C core
 
     func testLiveCaptureWritesAReadableRecordWithACrashedThread() throws {
@@ -205,6 +263,7 @@ final class CrashTests: XCTestCase {
                                      clock: TestClock())
         reporter.setCustomKey("email", "someone@example.com")
         reporter.recordError(type: "TestError", reason: "boom")
+        reporter.waitForPendingWrites()
 
         let url = try XCTUnwrap(store.pendingReports().first)
         let report = try WireCoding.decoder.decode(CrashReportWire.self, from: try Data(contentsOf: url))
@@ -221,6 +280,7 @@ final class CrashTests: XCTestCase {
         for i in 0..<(CrashLimits.maxCustomKeys + 3) { reporter.setCrashKeyForTest("k\(i)", "v") }
         reporter.setCrashKeyForTest("long", String(repeating: "x", count: 500))
         reporter.recordError(type: "TestError", reason: nil)
+        reporter.waitForPendingWrites()
 
         let url = try XCTUnwrap(store.pendingReports().first)
         let report = try WireCoding.decoder.decode(CrashReportWire.self, from: try Data(contentsOf: url))
@@ -235,6 +295,7 @@ final class CrashTests: XCTestCase {
                                      device: Fixtures.device, logger: SDKLogger(level: .none, handler: nil),
                                      clock: TestClock())
         reporter.recordError(type: "DecodingError", reason: "missing key")
+        reporter.waitForPendingWrites()
 
         let url = try XCTUnwrap(store.pendingReports().first)
         let report = try WireCoding.decoder.decode(CrashReportWire.self, from: try Data(contentsOf: url))
@@ -265,6 +326,7 @@ final class CrashTests: XCTestCase {
                                      device: Fixtures.device, logger: SDKLogger(level: .none, handler: nil),
                                      clock: TestClock())
         reporter.recordError(type: "TestError", reason: nil)
+        reporter.waitForPendingWrites()
         await reporter.flushPending()
         XCTAssertEqual(store.pendingReports().count, 1, "a 500 keeps the report for the next launch")
 

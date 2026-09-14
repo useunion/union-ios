@@ -227,3 +227,18 @@ enum CrashLimits {
 
 /// Lowercase `0x…`, which is what `HexAddress` in the contract accepts.
 func crashHex(_ value: UInt64) -> String { "0x" + String(value, radix: 16) }
+
+/// Table-driven, because the obvious spelling is not cheap: `String(format: "%02X", …)` per byte goes
+/// through `NSString` formatting, and the image list runs it sixteen times for each of up to
+/// `CrashLimits.maxImages` entries at launch.
+func hexString<S: Sequence<UInt8>>(_ bytes: S, uppercase: Bool) -> String {
+    let digits = uppercase ? "0123456789ABCDEF" : "0123456789abcdef"
+    let table = Array(digits.utf8)
+    var out: [UInt8] = []
+    out.reserveCapacity(32)
+    for byte in bytes {
+        out.append(table[Int(byte >> 4)])
+        out.append(table[Int(byte & 0x0F)])
+    }
+    return String(decoding: out, as: UTF8.self)
+}

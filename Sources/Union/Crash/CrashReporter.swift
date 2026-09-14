@@ -35,6 +35,21 @@ final class CrashReporter: @unchecked Sendable {
     private let clock: Clock
 
     private let lock = NSLock()
+    /**
+     * Where the sidecar is written, and why it is not the caller's thread.
+     *
+     * `setForeground` is called from `AppLifecycleObserver.init` on the main actor, and it used to
+     * encode and atomically write the sidecar inline — a synchronous file write on the main thread
+     * during launch, which is what the `MainThreadHang` report named `CrashStore.writeContext`.
+     * `breadcrumb` has the same shape on whichever thread the app reports from.
+     *
+     * Serial, so the snapshot order is the order that reaches disk: callers sample under `lock` on
+     * their own thread and hand over a value, so a later sample can never be overtaken by an earlier
+     * one. `userInitiated` rather than `utility` because the point of the file is to be on disk
+     * before the process dies — the window this opens is the staleness the type's doc comment
+     * already admits to, and widening it by a scheduling delay would be the wrong economy.
+     */
+    private let persistQueue = DispatchQueue(label: "dev.union.crash.persist", qos: .userInitiated)
     /// The id of *this* launch's record: the file the handler owns and nobody may upload yet.
     private let currentId = UUID().uuidString
     private var sessionId: String?
@@ -75,20 +90,22 @@ final class CrashReporter: @unchecked Sendable {
      * crash in the microsecond after installation would otherwise produce a record with nothing to
      * explain it. And the upload runs after, so a crash during the upload of an older crash still
      * lands as its own record.
+     *
+     * The device state is sampled here rather than on the queue, because `DeviceStateSampler` reads
+     * UIKit and answers `nil` off the main thread — see its own comment. It is two syscalls and a
+     * property read, not a file write.
      */
     func start(sessionId: String?) {
         lock.lock()
         guard !installed else { lock.unlock(); return }
         installed = true
         self.sessionId = sessionId
-        images = CrashReporter.loadedImages()
-        state = DeviceStateSampler.sample()
+        state = DeviceStateSampler.interfaceSample()
         lastSampleAt = clock.now
         lock.unlock()
 
         do {
-            try store.writeImages(images, id: currentId)
-            try persistContext()
+            try persistContextNow()
         } catch {
             logger.log(.warning, "crash: could not write the crash sidecar (\(error)) — not installing")
             return
@@ -103,6 +120,10 @@ final class CrashReporter: @unchecked Sendable {
         if config.detectHangs { startWatchdog() }
         logger.log(.info, "crash: handlers installed · record=\(currentId)")
 
+        captureImages()
+        // Completes the sample with the two filesystem fields `interfaceSample` left out, and
+        // rewrites the sidecar. A crash in between has the rest of the state, not none of it.
+        refreshState()
         store.trim(max: config.maxStored)
         Task { await self.flushPending() }
     }
@@ -134,18 +155,14 @@ final class CrashReporter: @unchecked Sendable {
 
     func setForeground(_ foreground: Bool) {
         union_crash_set_foreground(foreground ? 1 : 0)
-        lock.lock()
-        state = DeviceStateSampler.sample()
-        lastSampleAt = clock.now
-        lock.unlock()
-        try? persistContext()
+        refreshState()
     }
 
     func setSessionId(_ id: String?) {
         lock.lock()
         sessionId = id
         lock.unlock()
-        try? persistContext()
+        persistContext()
     }
 
     /**
@@ -174,29 +191,102 @@ final class CrashReporter: @unchecked Sendable {
             customKeys.removeValue(forKey: trimmedKey)
         }
         lock.unlock()
-        try? persistContext()
+        persistContext()
     }
 
     private func resampleIfStale() {
         lock.lock()
         let due = clock.now.timeIntervalSince(lastSampleAt) >= CrashReporter.sampleInterval
-        if due {
-            state = DeviceStateSampler.sample()
-            lastSampleAt = clock.now
-        }
+        // Claimed here rather than when the sample lands, so a burst of breadcrumbs queues one
+        // refresh and not one per crumb.
+        if due { lastSampleAt = clock.now }
         lock.unlock()
-        if due { try? persistContext() }
+        if due { refreshState() }
     }
 
-    private func persistContext() throws {
+    /**
+     * Re-samples the device and rewrites the sidecar, splitting the work by which thread may do it.
+     *
+     * The UIKit half has to happen on the caller — `DeviceStateSampler` answers `nil` for it off the
+     * main thread — and is two property reads. The filesystem half (the volume stat and the jailbreak
+     * probe) goes to the queue with the write, because `setForeground` is called on the main actor
+     * during launch and that is exactly where the hang was.
+     */
+    private func refreshState() {
+        let interface = DeviceStateSampler.interfaceSample()
+        persistQueue.async { [weak self] in
+            guard let self else { return }
+            let sampled = DeviceStateSampler.merged(interface: interface,
+                                                    system: DeviceStateSampler.systemSample())
+            self.lock.lock()
+            self.state = sampled
+            self.lock.unlock()
+            do {
+                try self.store.writeContext(self.snapshotContext(), id: self.currentId)
+            } catch {
+                self.logger.log(.warning, "crash: could not write the crash sidecar (\(error))")
+            }
+        }
+    }
+
+    private func snapshotContext() -> CrashContextFile {
         lock.lock()
-        let file = CrashContextFile(sessionId: sessionId,
-                                    context: device,
-                                    state: state,
-                                    customKeys: customKeys.isEmpty ? nil : customKeys,
-                                    sampledAt: Int64(lastSampleAt.timeIntervalSince1970 * 1000))
-        lock.unlock()
-        try store.writeContext(file, id: currentId)
+        defer { lock.unlock() }
+        return CrashContextFile(sessionId: sessionId,
+                                context: device,
+                                state: state,
+                                customKeys: customKeys.isEmpty ? nil : customKeys,
+                                sampledAt: Int64(lastSampleAt.timeIntervalSince1970 * 1000))
+    }
+
+    /// Takes the snapshot here and writes it there. Never blocks the caller on disk.
+    private func persistContext() {
+        let file = snapshotContext()
+        persistQueue.async { [store, currentId, logger] in
+            do {
+                try store.writeContext(file, id: currentId)
+            } catch {
+                logger.log(.warning, "crash: could not write the crash sidecar (\(error))")
+            }
+        }
+    }
+
+    /// The one caller that has to wait: `start` writes the sidecar *before* the handlers are
+    /// installed, so a crash in the microsecond after installation has something to explain it. It is
+    /// one small write, once per launch, and it is the reason `start` can still refuse to install.
+    private func persistContextNow() throws {
+        try store.writeContext(snapshotContext(), id: currentId)
+    }
+
+    /**
+     * The image list, and why it is the one part of the sidecar that is *not* written before the
+     * handlers go in.
+     *
+     * It is the large half — up to `CrashLimits.maxImages` entries of path, uuid and load address,
+     * around a hundred kilobytes of JSON — and collecting it walks dyld. `start` is called from
+     * `Client.init`, which apps call from `didFinishLaunching`, so doing this inline puts all of it
+     * on the main thread at launch. That is the same cost that produced a `MainThreadHang` for the
+     * sidecar write, in a bigger size.
+     *
+     * The trade, on the record: a crash in the window before this lands is reported with no images,
+     * so its frames carry addresses and `image: null` rather than a symbol. The window is
+     * milliseconds against a list that is fixed for the life of the process, and `loadSidecar`
+     * already treats a missing image file as `[]` rather than as a broken report. A crash that early
+     * with no symbols beats a launch the user notices.
+     */
+    private func captureImages() {
+        persistQueue.async { [weak self] in
+            guard let self else { return }
+            let images = CrashReporter.loadedImages()
+            self.lock.lock()
+            self.images = images
+            self.lock.unlock()
+            do {
+                try self.store.writeImages(images, id: self.currentId)
+            } catch {
+                self.logger.log(.warning, "crash: could not write the image list (\(error))")
+            }
+        }
     }
 
     // MARK: - Non-fatals
@@ -264,13 +354,25 @@ final class CrashReporter: @unchecked Sendable {
             breadcrumbs: nil,
             customKeys: sidecar.customKeys
         )
-        do {
-            try store.write(report: report)
-            store.trim(max: config.maxStored)
-        } catch {
-            logger.log(.warning, "crash: could not store a \(kind.rawValue) report (\(error))")
+        /*
+         * Off the caller's thread, for the reason the sidecar is: `Union.recordError` is documented
+         * as callable from anywhere and apps call it from the main thread, and this report carries
+         * the whole image list — about a hundred kilobytes to encode and write. The stack was already
+         * taken above, on the caller, which is the only part that has to happen there.
+         */
+        persistQueue.async { [store, config, logger] in
+            do {
+                try store.write(report: report)
+                store.trim(max: config.maxStored)
+            } catch {
+                logger.log(.warning, "crash: could not store a \(kind.rawValue) report (\(error))")
+            }
         }
     }
+
+    /// Test hook: waits for the writes this type schedules. Nothing in the SDK calls it — the queue is
+    /// serial, so draining it is the only way a test can assert on a file it did not write itself.
+    func waitForPendingWrites() { persistQueue.sync {} }
 
     // MARK: - Hangs
 
@@ -457,9 +559,7 @@ final class CrashReporter: @unchecked Sendable {
             if image.has_uuid == 1 {
                 // Uppercase, no dashes: the exact spelling of `LC_UUID` in a dSYM, because a
                 // difference in spelling looks identical to holding no dSYM at all.
-                uuid = withUnsafeBytes(of: image.uuid) { bytes in
-                    bytes.map { String(format: "%02X", $0) }.joined()
-                }
+                uuid = withUnsafeBytes(of: image.uuid) { hexString($0, uppercase: true) }
             }
             return BinaryImageWire(name: String(name.suffix(255)),
                                    uuid: uuid,

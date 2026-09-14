@@ -6,8 +6,9 @@ final class Client: Sendable {
     let logger: SDKLogger
     /// Held so `Union.installId` can read the id without hopping onto the pipeline
     /// actor: the facade is synchronous everywhere else, and an `async` getter here
-    /// would be the only call a caller has to await.
-    let identityStore: IdentityStore
+    /// would be the only call a caller has to await. The coordinator caches, so repeated
+    /// reads cost nothing after the first — it used to go to the Keychain every time.
+    let identity: IdentityCoordinator
     /// `nil` when `Options.crashReporting` is off — nothing is installed then, not even the directory.
     let crash: CrashReporter?
     #if canImport(UIKit) && !os(watchOS)
@@ -27,13 +28,15 @@ final class Client: Sendable {
         #else
         identityStore = privacyMode == .strictAnonymous ? NoopIdentityStore() : InMemoryIdentityStore()
         #endif
-        let hadIdentity = identityStore.load().installId != nil
-        self.identityStore = identityStore
+        // Constructed, not read. The Keychain is touched by whoever asks first, which is the pipeline
+        // actor unless the app reads `Union.installId` before it gets there.
+        let identity = IdentityCoordinator(store: identityStore, privacyMode: privacyMode)
+        self.identity = identity
         pipeline = EventPipeline(
             config: PipelineConfig(writeKey: writeKey, environment: environment, privacyMode: privacyMode, flushAt: options.flushAt, flushInterval: options.flushInterval, maxQueuedEvents: options.maxQueuedEvents),
             store: store,
             transport: URLSessionTransport(endpoint: options.endpoint),
-            identityStore: identityStore,
+            identity: identity,
             kv: UserDefaultsStore(),
             clock: SystemClock(),
             logger: logger,
@@ -56,10 +59,10 @@ final class Client: Sendable {
             reporter.start(sessionId: nil)
             Task {
                 await p.attach(crash: reporter)
-                await p.start(hadPersistentIdentity: hadIdentity)
+                await p.start()
             }
         } else {
-            Task { await p.start(hadPersistentIdentity: hadIdentity) }
+            Task { await p.start() }
         }
         #if canImport(UIKit) && !os(watchOS)
         let auto = options.automaticScreenTracking

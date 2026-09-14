@@ -49,6 +49,11 @@ struct PendingCrash: Sendable {
 final class CrashStore: @unchecked Sendable {
     let directory: URL
 
+    /// Serializes the writers. `writeContext` has five callers on three threads (see
+    /// `CrashReporter.persistContext`) and they all target the same path for `currentId`, so without
+    /// this two atomic replacements of one file race each other.
+    private let writeLock = NSLock()
+
     init(directory: URL) throws {
         self.directory = directory
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -75,10 +80,14 @@ final class CrashStore: @unchecked Sendable {
     func reportURL(id: String) -> URL { directory.appendingPathComponent("\(id).report.json") }
 
     func writeContext(_ file: CrashContextFile, id: String) throws {
+        writeLock.lock()
+        defer { writeLock.unlock() }
         try WireCoding.encoder.encode(file).write(to: sidecarURL(id: id), options: .atomic)
     }
 
     func writeImages(_ images: [BinaryImageWire], id: String) throws {
+        writeLock.lock()
+        defer { writeLock.unlock() }
         try WireCoding.encoder.encode(images).write(to: imagesURL(id: id), options: .atomic)
     }
 
@@ -135,6 +144,8 @@ final class CrashStore: @unchecked Sendable {
     func discard(url: URL) { try? FileManager.default.removeItem(at: url) }
 
     func write(report: CrashReportWire) throws {
+        writeLock.lock()
+        defer { writeLock.unlock() }
         let data = try WireCoding.encoder.encode(report)
         try data.write(to: reportURL(id: report.crashId), options: .atomic)
     }

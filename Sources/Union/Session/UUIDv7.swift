@@ -30,7 +30,7 @@ enum UUIDv7 {
         for i in (8..<16).reversed() { bytes[i] = UInt8(randB & 0xFF); randB >>= 8 }
         bytes[8] = (bytes[8] & 0x3F) | 0x80
 
-        let hex = bytes.map { String(format: "%02x", $0) }.joined()
+        let hex = hexString(bytes, uppercase: false)
         return "\(hex.prefix(8))-\(hex.dropFirst(8).prefix(4))-\(hex.dropFirst(12).prefix(4))-\(hex.dropFirst(16).prefix(4))-\(hex.dropFirst(20))"
     }
 }

@@ -166,7 +166,10 @@ public enum Union {
     /// This is an identifier for a device, so an app that forwards it is responsible
     /// for its own App Privacy answers — as with `identify(userId:traits:)`.
     public static var installId: String? {
-        shared?.identityStore.load().installId
+        // `ensure` rather than a plain read: the id is minted on first use, and before this the mint
+        // happened in `Client.init`, so an app that reads this straight after `configure` must still
+        // get a value. It is cached, so only the first caller anywhere pays for it.
+        shared.map { $0.identity.ensure(now: Date()).installId } ?? nil
     }
 
     /// The same install id as a `UUID`, for StoreKit's `Product.PurchaseOption.appAccountToken`.
