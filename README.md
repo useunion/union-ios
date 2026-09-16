@@ -45,12 +45,23 @@ Declare a feature where its events are sent, and the funnel builds itself:
 
 ```swift
 let checkout = Union.feature("checkout")
-checkout.screen("Checkout")                                   // discovery — saw the screen
-checkout.start("checkout_started")
-checkout.use("shipping_selected")
-checkout.success("order_placed", properties: ["total": 49.9])
-checkout.failure("payment_failed")
+checkout.screen("Checkout")                                   // discovery — saw it exists
+checkout.start("checkout_started")                            // start — tried; the funnel's denominator
+checkout.use("shipping_selected")                             // use — working inside it, not a step
+checkout.success("order_placed", properties: ["total": 49.9]) // success — got what they came for
+checkout.failure("payment_failed")                            // failure — the user's attempt failed
 ```
+
+The roles are a funnel, so `start` and `success` are the two that make one: a feature with only
+`use` counts traffic and shows nothing about where people drop, and a feature with no `failure`
+reads as if nobody ever fails. `failure` means an attempt that failed *for the user* — a refused
+permission, an empty result, a save that did not happen — not any caught error; those are
+`recordError`. Give a giving-up its **own event name**: one name declared `success` in one place
+and `failure` in another is a conflict the server shows and does not resolve.
+
+A feature is something a user can fail to adopt. Naming one after a database table means every
+user touches it on day one, so it reports full adoption and tells you nothing; events in that part
+of a product are better sent with no feature key at all.
 
 A declaration is a definition, not a hint. From production and TestFlight builds the server creates the
 feature (or adds the new events to one the panel already has) — no inbox step — and the panel refines

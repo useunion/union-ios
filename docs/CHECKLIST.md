@@ -77,6 +77,38 @@ Reguły, których nie łamiemy:
 - Nazwa feature'a w panelu to na start title-case klucza (`cart_item` → „Cart item"). Ładna nazwa to
   edycja w panelu, nie drugi klucz.
 
+## 1c. Semantyka ról
+
+Sekcja 1b mówi, **jak** deklarować rolę, i nigdzie nie mówi, **co która znaczy**. `FeatureRole` to w
+`Configuration.swift` goły `case discovery, start, use, success, failure` z jednym zdaniem komentarza, a
+jedyny opis w całym repo to `// discovery — saw the screen` w przykładzie README. To nie jest luka
+kosmetyczna: rola, której nikt nie zdefiniował, staje się w aplikacji tym, co akurat pasowało. Pierwszy
+konsument (Boardly) wypełnił ją tak, że `.use` został kubłem domyślnym, żaden feature poza jednym nie
+miał `start`, nic nigdy nie zgłosiło `failure`, a `onboarding_completed` dostało `success` albo `failure`
+zależnie od wartości pola — czyli dokładnie `declared_conflict` z sekcji 1b. Panel pokazywał wtedy same
+liczniki ruchu i ani jednego leja.
+
+| Rola | Co znaczy | Typowy event | Stan |
+|---|---|---|---|
+| `discovery` | **zobaczył, że to istnieje**, i jeszcze nie spróbował. Nie liczy się do prób — dlatego `$screen_view` z kluczem dostaje ją automatycznie | `$screen_view`, otwarcie menu, dotknięcie chipa | [x] |
+| `start` | **podjął próbę, wynik nieznany.** To jest mianownik leja; feature bez `start` nie ma leja, tylko licznik | `checkout_started`, fokus w polu, otwarcie pickera | [x] |
+| `use` | **pracuje w środku feature'a.** Może wystąpić wielokrotnie w jednej próbie i **nie jest etapem leja** — mierzy głębokość użycia, nie postęp | `shipping_selected`, zmiana właściwości | [x] |
+| `success` | **feature dał to, po co się po niego sięgnęło.** Licznik leja. Jeden na próbę, nie jeden na kliknięcie | `order_placed`, plik dodany, lista odhaczona | [x] |
+| `failure` | **próba zakończona niepowodzeniem z punktu widzenia użytkownika**: odmowa uprawnienia, zero wyników, nieudany zapis. Nie każdy wyjątek w logu — od tego są `recordError` i raporty awarii | `payment_failed`, `search_no_results`, odmowa powiadomień | [x] |
+
+Reguły, których nie łamiemy:
+- **Rezygnacja to osobna nazwa eventu, nigdy `failure` pod nazwą, która gdzie indziej znaczy `success`.**
+  To wprost konflikt z sekcji 1b: serwer go pokazuje i nie rozstrzyga. `onboarding_completed` i
+  `onboarding_abandoned` to dwa eventy, nie jeden z polem `skipped`.
+- **Feature to coś, czego użytkownik może nie zaadaptować.** Klucz nazwany od tabeli w bazie (`items`,
+  `users`) ma zawsze 100% adopcji i zero informacji — każdy go dotyka w pierwszej minucie. Jeśli event
+  należy do rdzenia produktu, lepiej wysłać go **bez** klucza niż wymyślić feature, którego nie da się nie
+  użyć.
+- **Feature bez `failure` nie pokaże, gdzie ludzie odpadają.** Jeśli próba może się nie udać w sposób,
+  który użytkownik zauważa, ta ścieżka ma swój event — inaczej lej jest z definicji stuprocentowy.
+- **Zadeklarowany feature bez ruchu jest gorszy niż jego brak**, bo w panelu czyta się jako zerowa
+  adopcja, a nie jako „nie mierzone". Deklaruj feature, kiedy istnieje ścieżka, która go emituje.
+
 ## 2. Kontekst urządzenia (raz na paczkę, nie per event)
 
 `DeviceContext`: `app_version`, `app_build`, `sdk_version`, `os_name` (`iOS`), `os_version`, `device_model`, `locale`, `timezone`. Wszystkie obowiązkowe, wszystkie przycięte do limitów z kontraktu. Brak IDFA, brak ATT, brak dokładnej lokalizacji — IP skraca serwer.
