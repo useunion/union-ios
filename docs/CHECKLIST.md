@@ -168,6 +168,7 @@ kto odinstalował, nigdy.
 | Retencja lokalna | `Options.maxStoredCrashReports` (16), najstarsze wypadają pierwsze — pętla crashy przy starcie bez sieci nie może zapchać dysku | [x] |
 | `optOut()` | kasuje też katalog crashów, nie tylko kolejkę eventów | [x] |
 | Domyślnie | **włączone** (`Options.crashReporting = true`), po obu stronach: serwerowa bramka `crash_reporting_enabled` też jest domyślnie włączona (migracja 0056 w repo `Union`). Wyłączenie po stronie projektu **nie** zatrzymuje uploadu — zamienia go w zapisaną odmowę (`collection_disabled`), więc nic nie ginie po cichu | [x] |
+| Weryfikacja end-to-end | `Scripts/crash-e2e.sh` — proces **naprawdę** umiera na SIGSEGV, drugi proces znajduje rekord na dysku i wysyła go gzipem do lokalnego udawanego `/v1/crash`. To jedyny szew, którego `swift test` nie umie dotknąć: runner, który dostaje SIGSEGV, nie raportuje nic, więc `CrashTests` idzie przez `union_crash_capture_live`. Skrypt sprawdza też, że nieudany upload **zostawia** plik. Uruchamiać przed releasem i po każdej zmianie w `Sources/UnionCrashCore` lub `Sources/Union/Crash` | [x] |
 | Symbolikacja | **żadnej.** Offsety to tożsamość, symbole to wyświetlanie: panel podaje gotową komendę `atos` per obraz. Upload dSYM jest poza zakresem i nie przegrupuje historii, gdy powstanie | — |
 
 Reguły, których nie łamiemy:
