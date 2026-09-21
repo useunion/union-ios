@@ -42,9 +42,9 @@ extension TransportResponse {
 enum Fixtures {
     static let device = DeviceContext(appVersion: "2.4.0", appBuild: "240", sdkVersion: SDKInfo.version, osVersion: "18.1", deviceModel: "iPhone16,1", locale: "pl-PL", timezone: "Europe/Warsaw")
 
-    static func pipeline(clock: TestClock = TestClock(), transport: StubTransport = StubTransport(), privacy: PrivacyMode = .productAnalytics, flushAt: Int = 100, kv: KeyValueStore = InMemoryKeyValueStore(), identity: IdentityStore = InMemoryIdentityStore()) -> EventPipeline {
+    static func pipeline(clock: TestClock = TestClock(), transport: StubTransport = StubTransport(), privacy: PrivacyMode = .productAnalytics, flushAt: Int = 100, analyticsCollectionEnabled: Bool = true, kv: KeyValueStore = InMemoryKeyValueStore(), identity: IdentityStore = InMemoryIdentityStore()) -> EventPipeline {
         EventPipeline(
-            config: PipelineConfig(writeKey: "test", environment: .production, privacyMode: privacy, flushAt: flushAt, flushInterval: 3600, maxQueuedEvents: 50),
+            config: PipelineConfig(writeKey: "test", environment: .production, privacyMode: privacy, flushAt: flushAt, flushInterval: 3600, maxQueuedEvents: 50, analyticsCollectionEnabled: analyticsCollectionEnabled),
             store: InMemoryEventStore(), transport: transport, identity: IdentityCoordinator(store: identity, privacyMode: privacy), kv: kv, clock: clock,
             logger: SDKLogger(level: .none, handler: nil), device: device
         )

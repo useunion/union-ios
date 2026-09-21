@@ -189,6 +189,50 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(id, .anonymous)
     }
 
+    func testAnalyticsCanStartDisabledWithoutCreatingEventsOrIdentity() async {
+        let transport = StubTransport()
+        let identity = CountingIdentityStore()
+        let p = Fixtures.pipeline(
+            transport: transport,
+            analyticsCollectionEnabled: false,
+            identity: identity
+        )
+
+        await p.start(hadPersistentIdentity: false)
+        await p.track(name: "ignored", properties: [:], role: nil, screen: nil)
+        await p.flush()
+
+        XCTAssertTrue(transport.sent.isEmpty)
+        XCTAssertEqual(identity.loads, 0)
+        let queued = await p.queuedEvents
+        let session = await p.currentSessionId
+        XCTAssertTrue(queued.isEmpty)
+        XCTAssertNil(session)
+    }
+
+    func testDisablingAnalyticsWipesEventsButCanBeEnabledAgain() async {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        await p.track(name: "before_opt_out", properties: [:], role: nil, screen: nil)
+
+        await p.setAnalyticsCollectionEnabled(false)
+        let queued = await p.queuedEvents
+        let session = await p.currentSessionId
+        let identity = await p.currentIdentity
+        XCTAssertTrue(queued.isEmpty)
+        XCTAssertNil(session)
+        XCTAssertEqual(identity, .anonymous)
+
+        await p.setAnalyticsCollectionEnabled(true)
+        await p.track(name: "after_opt_in", properties: [:], role: nil, screen: nil)
+        await p.flush()
+
+        XCTAssertEqual(transport.sent.count, 1)
+        XCTAssertTrue(transport.sent[0].events.contains { $0.name == "after_opt_in" })
+        XCTAssertFalse(transport.sent[0].events.contains { $0.name == "before_opt_out" })
+    }
+
     func testDeclaredFeatureTravelsOnTheEventAndTheScreenViewAndConformsToSchema() async throws {
         let transport = StubTransport()
         let p = Fixtures.pipeline(transport: transport)

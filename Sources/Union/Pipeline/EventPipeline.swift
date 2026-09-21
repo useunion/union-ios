@@ -7,6 +7,7 @@ struct PipelineConfig: Sendable {
     var flushAt: Int
     var flushInterval: TimeInterval
     var maxQueuedEvents: Int
+    var analyticsCollectionEnabled: Bool
 }
 
 /// Owns the queue, session state, identity and network. Every public SDK call ends up here.
@@ -29,6 +30,7 @@ actor EventPipeline {
     private var flushing = false
     private var timer: Task<Void, Never>?
     private(set) var optedOut = false
+    private var analyticsCollectionEnabled: Bool
     /// Set by `Client` right after construction. Optional because crash reporting can be off, and
     /// because every crash call from here has to be a no-op then rather than a branch at each site.
     private var crash: CrashReporter?
@@ -56,6 +58,7 @@ actor EventPipeline {
         self.device = device
         self.session = SessionManager(clock: clock, store: kv)
         self.optedOut = kv.string(forKey: "opt_out") == "1"
+        self.analyticsCollectionEnabled = config.analyticsCollectionEnabled
         self.kv = kv
         self.identity = .anonymous
     }
@@ -67,8 +70,18 @@ actor EventPipeline {
     private func ensurePrepared() {
         guard !prepared else { return }
         prepared = true
-        identity = identityStore.ensure(now: clock.now)
-        queue = (try? store.load()) ?? []
+        if analyticsCollectionEnabled {
+            identity = identityStore.ensure(now: clock.now)
+            queue = (try? store.load()) ?? []
+        } else {
+            // Consent is authoritative at startup. Do not even materialize the product identity,
+            // and discard anything a previous run may have left queued before consent changed.
+            identityStore.wipe()
+            session.clear()
+            try? store.replaceAll([])
+            identity = .anonymous
+            queue = []
+        }
     }
 
     func attach(crash: CrashReporter?) {
@@ -95,7 +108,7 @@ actor EventPipeline {
     /// coordinator's, which is the only one that can be right now that the load happens here.
     func start(hadPersistentIdentity: Bool? = nil) {
         ensurePrepared()
-        guard !optedOut else { return }
+        guard !optedOut, analyticsCollectionEnabled else { return }
         let outcome = InstallState.evaluate(store: kv, device: device,
                                             hadPersistentIdentity: hadPersistentIdentity ?? identityStore.hadPersistentIdentity)
         let t = session.touch()
@@ -123,7 +136,7 @@ actor EventPipeline {
 
     func didEnterBackground() async {
         ensurePrepared()
-        guard !optedOut else { return }
+        guard !optedOut, analyticsCollectionEnabled else { return }
         if case .continued(let sid) = session.touch() { push(system(.background, sessionId: sid)) }
         timer?.cancel(); timer = nil
         await flush()
@@ -131,7 +144,7 @@ actor EventPipeline {
 
     func willEnterForeground() {
         ensurePrepared()
-        guard !optedOut else { return }
+        guard !optedOut, analyticsCollectionEnabled else { return }
         switch session.touch() {
         case .continued(let sid): push(system(.foreground, sessionId: sid))
         case .rotated(let ended, let started):
@@ -144,7 +157,7 @@ actor EventPipeline {
 
     func willTerminate() async {
         ensurePrepared()
-        guard !optedOut, let cur = session.current else { return }
+        guard !optedOut, analyticsCollectionEnabled, let cur = session.current else { return }
         push(system(.sessionEnd, sessionId: cur.sessionId))
         await flush()
     }
@@ -155,7 +168,7 @@ actor EventPipeline {
     /// stripped of the feature it was written for would read on the server as "part of no feature".
     func track(name: String, properties: [String: PropertyValue], feature: String? = nil, role: FeatureRole?, screen: String?) {
         ensurePrepared()
-        guard !optedOut, !stopped else { return }
+        guard !optedOut, analyticsCollectionEnabled, !stopped else { return }
         do {
             try Validation.validateCustomName(name)
             try Validation.validate(properties: properties)
@@ -173,7 +186,7 @@ actor EventPipeline {
     /// `feature` makes this screen view the feature's discovery step (`role` is implied on the server).
     func screen(name: String, properties: [String: PropertyValue], feature: String? = nil) {
         ensurePrepared()
-        guard !optedOut, !stopped else { return }
+        guard !optedOut, analyticsCollectionEnabled, !stopped else { return }
         do {
             try Validation.validate(screen: name)
             try Validation.validate(properties: properties)
@@ -193,7 +206,7 @@ actor EventPipeline {
 
     func deepLink(_ url: URL) {
         ensurePrepared()
-        guard !optedOut, !stopped else { return }
+        guard !optedOut, analyticsCollectionEnabled, !stopped else { return }
         var props: [String: PropertyValue] = [:]
         if let s = url.scheme { props["url_scheme"] = .string(String(s.prefix(Limits.propertyStringMaxLength))) }
         if let h = url.host { props["host"] = .string(String(h.prefix(Limits.propertyStringMaxLength))) }
@@ -204,7 +217,7 @@ actor EventPipeline {
 
     func identify(userId: String, traits: [String: String] = [:]) {
         ensurePrepared()
-        guard !optedOut else { return }
+        guard !optedOut, analyticsCollectionEnabled else { return }
         guard config.privacyMode == .productAnalytics else {
             logger.log(.warning, "identify() ignored: project is strict_anonymous")
             return
@@ -242,6 +255,36 @@ actor EventPipeline {
         }
     }
 
+    /// Pauses or resumes product analytics without touching crash and hang reporting.
+    ///
+    /// Disabling is intentionally destructive for analytics state: queued events, the product
+    /// identity and the current session are removed so an opt-out cannot leak on the next enable.
+    /// Unlike `optOut()`, crash reports and the process-wide crash handlers remain intact.
+    func setAnalyticsCollectionEnabled(_ enabled: Bool) {
+        ensurePrepared()
+        guard analyticsCollectionEnabled != enabled else { return }
+        analyticsCollectionEnabled = enabled
+
+        guard enabled else {
+            queue.removeAll()
+            try? store.replaceAll([])
+            identityStore.wipe()
+            identity = .anonymous
+            session.clear()
+            timer?.cancel()
+            timer = nil
+            crashSessionId = nil
+            crash?.setSessionId(nil)
+            logger.log(.info, "product analytics disabled; crash reporting remains active")
+            return
+        }
+
+        guard !optedOut else { return }
+        identityStore.forget()
+        identity = identityStore.ensure(now: clock.now)
+        start(hadPersistentIdentity: false)
+    }
+
     /// Stops collection, wipes queue, identity and session state, persists the flag.
     func optOut() {
         ensurePrepared()
@@ -275,7 +318,7 @@ actor EventPipeline {
 
     func flush() async {
         ensurePrepared()
-        guard !flushing, !stopped, !optedOut else { return }
+        guard !flushing, !stopped, !optedOut, analyticsCollectionEnabled else { return }
         if let until = pausedUntil, until > clock.now { return }
         flushing = true
         defer { flushing = false }
@@ -405,4 +448,5 @@ actor EventPipeline {
     var currentIdentity: Identity { identity }
     var isStopped: Bool { stopped }
     var isPaused: Bool { (pausedUntil ?? .distantPast) > clock.now }
+    var isAnalyticsCollectionEnabled: Bool { analyticsCollectionEnabled }
 }

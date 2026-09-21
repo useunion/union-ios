@@ -54,6 +54,12 @@ public enum PropertyValue: Sendable, Equatable, Codable, ExpressibleByStringLite
 }
 
 public struct Options: Sendable {
+    /// Whether product analytics starts collecting as soon as the SDK is configured.
+    ///
+    /// Set this to `false` when consent lives behind app-owned storage that is not available at
+    /// launch. Crash and hang reporting remains active and can cover that launch window; call
+    /// `Union.setAnalyticsCollectionEnabled(true)` after consent has been restored.
+    public var analyticsCollectionEnabled: Bool = true
     /// Ingest endpoint. Defaults to the hosted Union ingest.
     public var endpoint: URL = URL(string: "https://in.useunion.dev/v1/batch")!
     /// Overrides automatic detection (DEBUG → development, sandbox receipt → testflight, else production).

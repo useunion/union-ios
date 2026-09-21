@@ -74,6 +74,13 @@ public enum Union {
         Task { await p.reset() }
     }
 
+    /// Enables or disables product analytics while leaving crash and hang reporting active.
+    /// Use `optOut()` when the user wants all Union collection, including diagnostics, disabled.
+    public static func setAnalyticsCollectionEnabled(_ enabled: Bool) {
+        guard let p = shared?.pipeline else { return }
+        Task { await p.setAnalyticsCollectionEnabled(enabled) }
+    }
+
     /// Stops collection and wipes all locally stored data. Persists across launches until `optIn()`.
     public static func optOut() {
         guard let p = shared?.pipeline else { return }

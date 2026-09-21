@@ -11,7 +11,7 @@ final class IntegrationTests: XCTestCase {
 
         let transport = URLSessionTransport(endpoint: endpoint)
         let p = EventPipeline(
-            config: PipelineConfig(writeKey: key, environment: .production, privacyMode: .productAnalytics, flushAt: 100, flushInterval: 3600, maxQueuedEvents: 100),
+            config: PipelineConfig(writeKey: key, environment: .production, privacyMode: .productAnalytics, flushAt: 100, flushInterval: 3600, maxQueuedEvents: 100, analyticsCollectionEnabled: true),
             store: InMemoryEventStore(), transport: transport, identity: IdentityCoordinator(store: InMemoryIdentityStore(), privacyMode: .productAnalytics), kv: InMemoryKeyValueStore(),
             clock: SystemClock(), logger: SDKLogger(level: .debug, handler: { print("[AV \($0)] \($1)") }), device: Fixtures.device
         )

@@ -33,7 +33,7 @@ final class Client: Sendable {
         let identity = IdentityCoordinator(store: identityStore, privacyMode: privacyMode)
         self.identity = identity
         pipeline = EventPipeline(
-            config: PipelineConfig(writeKey: writeKey, environment: environment, privacyMode: privacyMode, flushAt: options.flushAt, flushInterval: options.flushInterval, maxQueuedEvents: options.maxQueuedEvents),
+            config: PipelineConfig(writeKey: writeKey, environment: environment, privacyMode: privacyMode, flushAt: options.flushAt, flushInterval: options.flushInterval, maxQueuedEvents: options.maxQueuedEvents, analyticsCollectionEnabled: options.analyticsCollectionEnabled),
             store: store,
             transport: URLSessionTransport(endpoint: options.endpoint),
             identity: identity,
