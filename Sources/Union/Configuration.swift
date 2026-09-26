@@ -1,6 +1,7 @@
 import Foundation
 
-/// Mirrors `environment` in the wire contract. A write key is bound to exactly one environment server-side.
+/// Mirrors `environment` in the wire contract. Detected per build (see `EnvironmentDetector`); a write key
+/// accepts every environment unless it was created before keys stopped being bound.
 public enum Environment: String, Codable, Sendable {
     case development, testflight, production
 }

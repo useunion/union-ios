@@ -1,7 +1,8 @@
 import Foundation
 
 /// development → DEBUG builds; testflight → sandbox receipt; production otherwise. Override with `Options.environment`.
-/// Ship a distinct write key per build configuration: keys are bound to one environment server-side.
+/// One write key serves every build: the server stores the environment this reports. Keys created before
+/// server migration 0090 are still bound to one environment, and a mismatch is refused there.
 enum EnvironmentDetector {
     static func detect(bundle: Bundle = .main) -> Environment {
         #if DEBUG
