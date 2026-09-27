@@ -120,7 +120,7 @@ o.logHandler = { level, msg in print("[AV]", level, msg) }
 Union.configure(writeKey: "av_…", privacyMode: .productAnalytics, options: o)
 ```
 
-One write key serves every build: the SDK detects the environment itself (DEBUG → development, TestFlight sandbox receipt → testflight, otherwise production) and sends it with each batch; override with `Options.environment`. Keys created before environments were unbound are still bound to one — with such a key, a mismatch is reported once in the log and the batch is dropped.
+One write key serves every build: the SDK detects the environment itself (DEBUG → development, TestFlight → testflight, otherwise production) and sends it with each batch; override with `Options.environment`. The first answer comes from the receipt at launch; StoreKit's signed `AppTransaction.environment` replaces it as soon as it arrives, and every batch built after that carries it. Keys created before environments were unbound are still bound to one — with such a key, a mismatch is reported once in the log and the batch is dropped.
 
 ## Linking purchases
 

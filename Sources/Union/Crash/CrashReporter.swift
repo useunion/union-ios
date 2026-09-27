@@ -27,6 +27,9 @@ final class CrashReporter: @unchecked Sendable {
     }
 
     private let config: Config
+    /// StoreKit's refinement of `config.environment`; read under `lock`. A report waiting on disk was
+    /// written by this same app, so the refined answer is the right one for it too.
+    private var refinedEnvironment: Environment?
     private let store: CrashStore
     private let transport: CrashTransport
     private let identityStore: IdentityStore
@@ -511,10 +514,20 @@ final class CrashReporter: @unchecked Sendable {
         }
     }
 
+    func setEnvironment(_ environment: Environment) {
+        lock.lock(); defer { lock.unlock() }
+        refinedEnvironment = environment
+    }
+
+    var environment: Environment {
+        lock.lock(); defer { lock.unlock() }
+        return refinedEnvironment ?? config.environment
+    }
+
     private func send(_ reports: [CrashReportWire]) async -> CrashUploadOutcome {
         let identity = config.privacyMode == .strictAnonymous ? Identity.anonymous : identityStore.load()
         let batch = CrashBatchWire(batchId: UUID().uuidString,
-                                   environment: config.environment,
+                                   environment: environment,
                                    privacyMode: config.privacyMode,
                                    sentAt: Int64(clock.now.timeIntervalSince1970 * 1000),
                                    identity: identity,

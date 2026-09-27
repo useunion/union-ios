@@ -13,7 +13,7 @@ struct PipelineConfig: Sendable {
 /// Owns the queue, session state, identity and network. Every public SDK call ends up here.
 /// Single actor → no locks, ordered enqueue, one in-flight flush.
 actor EventPipeline {
-    private let config: PipelineConfig
+    private var config: PipelineConfig
     private let store: EventStore
     private let transport: Transport
     private let identityStore: IdentityCoordinator
@@ -65,6 +65,16 @@ actor EventPipeline {
 
     private let kv: KeyValueStore
     private var prepared = false
+
+    /// StoreKit's answer, when it arrives after `configure`. The envelope reads the environment at
+    /// flush time, so a batch built from here on carries it — including events queued before, which
+    /// were produced by this same build and belong to the same environment.
+    func setEnvironment(_ environment: Environment) {
+        config.environment = environment
+    }
+
+    /// Test hook for `setEnvironment`.
+    var environment: Environment { config.environment }
 
     /// Idempotent, actor-isolated, and called first by every entry point below.
     private func ensurePrepared() {

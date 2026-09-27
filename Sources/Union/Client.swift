@@ -55,6 +55,19 @@ final class Client: Sendable {
         crash = reporter
         logger.log(.info, "configured · env=\(environment.rawValue) · privacy=\(privacyMode.rawValue) · sdk=\(SDKInfo.version) · crashes=\(options.crashReporting ? "on" : "off")")
         let p = pipeline
+        // The synchronous guess above can be wrong, and with one write key for every build nothing
+        // downstream refuses it. StoreKit's signed answer replaces it when it comes; an explicit
+        // `Options.environment` is the developer's word and is never second-guessed.
+        if options.environment == nil {
+            let log = logger
+            let initial = environment
+            Task {
+                guard let refined = await EnvironmentDetector.refined(), refined != initial else { return }
+                await p.setEnvironment(refined)
+                reporter?.setEnvironment(refined)
+                log.log(.info, "environment · \(initial.rawValue) → \(refined.rawValue) (StoreKit AppTransaction)")
+            }
+        }
         if let reporter {
             reporter.start(sessionId: nil)
             Task {
