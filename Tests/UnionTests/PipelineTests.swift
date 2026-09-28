@@ -500,4 +500,45 @@ final class PipelineTests: XCTestCase {
         XCTAssertLessThanOrEqual(bytes, Limits.batchMaxBytes)
         XCTAssertEqual(Batcher.nextBatch(from: [big], maxBytes: 10).count, 1, "oversized single event is still sent alone")
     }
+
+    // Cancelling the flush timer must not fire it. `Task.sleep` throws on cancellation and a `try?`
+    // used to fall through to `flush()`, so turning collection off and on again sent a batch nobody
+    // asked for — and raced the next explicit flush into returning before its events left.
+    func testCancellingTheFlushTimerDoesNotFlush() async throws {
+        let transport = StubTransport()
+        let p = Fixtures.pipeline(transport: transport)   // flushAt 100, interval 3600: nothing is due
+        await p.start(hadPersistentIdentity: false)
+        // Let the timer task reach its `sleep`: a task cancelled before it starts never enters the
+        // loop, which is why the defect only showed up as a flake.
+        try await Task.sleep(nanoseconds: 100_000_000)
+        await p.setAnalyticsCollectionEnabled(false)
+        await p.setAnalyticsCollectionEnabled(true)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertTrue(transport.sent.isEmpty)
+    }
+
+    // A flush that arrives while another is suspended in the transport waits for it and then sends
+    // what is left, instead of returning with its own events still queued.
+    func testFlushDuringAnInFlightFlushWaitsAndSendsEverything() async throws {
+        let transport = GatedTransport()
+        let p = Fixtures.pipeline(transport: transport)
+        await p.start(hadPersistentIdentity: false)
+        let first = Task { await p.flush() }
+        await transport.waitUntilHeld()                 // the first batch is inside `send`
+        await p.track(name: "queued_during_send", properties: [:], role: nil, screen: nil)
+        // What had been sent at the moment the second flush returned — the promise is about that
+        // moment. The old code returned while the first batch was still held, i.e. with nothing sent.
+        let second = Task { () -> [String] in
+            await p.flush()
+            return transport.sent.flatMap { $0.events.map(\.name) }
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)   // let `second` reach the wait
+        transport.release()
+        let sentWhenSecondReturned = await second.value
+        await first.value
+
+        XCTAssertTrue(sentWhenSecondReturned.contains("queued_during_send"))
+        let queued = await p.queuedEvents
+        XCTAssertTrue(queued.isEmpty)
+    }
 }

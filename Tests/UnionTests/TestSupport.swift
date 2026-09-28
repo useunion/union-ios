@@ -30,6 +30,50 @@ final class StubTransport: Transport, @unchecked Sendable {
     }
 }
 
+/// Holds the first `send` until `release()`, so a test can act while a flush is suspended in it.
+final class GatedTransport: Transport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var gate: CheckedContinuation<Void, Never>?
+    private var holding = false
+    private var held = false
+    private var released = false
+    private(set) var sent: [EventBatch] = []
+
+    func send(_ body: Data, writeKey: String) async throws -> TransportResponse {
+        let batch = try WireCoding.decoder.decode(EventBatch.self, from: body)
+        let first = lock.withLock { () -> Bool in
+            defer { holding = true }
+            return !holding
+        }
+        if first {
+            await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
+                let resumeNow = lock.withLock { () -> Bool in
+                    held = true
+                    if released { return true }
+                    gate = c
+                    return false
+                }
+                if resumeNow { c.resume() }
+            }
+        }
+        lock.withLock { sent.append(batch) }
+        return .accepted()
+    }
+
+    func waitUntilHeld() async {
+        while !lock.withLock({ held }) { await Task.yield() }
+    }
+
+    func release() {
+        let c = lock.withLock { () -> CheckedContinuation<Void, Never>? in
+            released = true
+            defer { gate = nil }
+            return gate
+        }
+        c?.resume()
+    }
+}
+
 extension TransportResponse {
     static func accepted(rejected: Int = 0) -> TransportResponse {
         TransportResponse(status: 202, body: Data("{\"accepted\":1,\"rejected\":\(rejected),\"batch_id\":\"b\"}".utf8), retryAfter: nil)
@@ -42,7 +86,7 @@ extension TransportResponse {
 enum Fixtures {
     static let device = DeviceContext(appVersion: "2.4.0", appBuild: "240", sdkVersion: SDKInfo.version, osVersion: "18.1", deviceModel: "iPhone16,1", locale: "pl-PL", timezone: "Europe/Warsaw")
 
-    static func pipeline(clock: TestClock = TestClock(), transport: StubTransport = StubTransport(), privacy: PrivacyMode = .productAnalytics, flushAt: Int = 100, analyticsCollectionEnabled: Bool = true, kv: KeyValueStore = InMemoryKeyValueStore(), identity: IdentityStore = InMemoryIdentityStore()) -> EventPipeline {
+    static func pipeline(clock: TestClock = TestClock(), transport: any Transport = StubTransport(), privacy: PrivacyMode = .productAnalytics, flushAt: Int = 100, analyticsCollectionEnabled: Bool = true, kv: KeyValueStore = InMemoryKeyValueStore(), identity: IdentityStore = InMemoryIdentityStore()) -> EventPipeline {
         EventPipeline(
             config: PipelineConfig(writeKey: "test", environment: .production, privacyMode: privacy, flushAt: flushAt, flushInterval: 3600, maxQueuedEvents: 50, analyticsCollectionEnabled: analyticsCollectionEnabled),
             store: InMemoryEventStore(), transport: transport, identity: IdentityCoordinator(store: identity, privacyMode: privacy), kv: kv, clock: clock,

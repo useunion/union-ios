@@ -151,6 +151,15 @@ Reguły, których nie łamiemy:
 - [x] kolejka NDJSON w Application Support, wykluczona z backupu, stabilna ścieżka między launchami
 - [x] paczki ≤ 100 eventów / ≤ 256 KB
 - [x] flush: co 10 s, przy 20 eventach, na wejściu w tło, na `flush()`
+- [x] `flush()` wywołane w trakcie innego flusha **czeka na niego i dosyła resztę**, nigdy nie wraca z
+  własnymi eventami w kolejce. Wcześniej `guard !flushing` zwracał od razu, a przez reentrancję aktora
+  (drain zawieszony w `transport.send`) `await Union.flush()` wracał, zanim eventy sprzed wywołania
+  wyszły. Zabetonowane `testFlushDuringAnInFlightFlushWaitsAndSendsEverything` (0.3.2)
+- [x] anulowanie timera flusha **nie odpala** flusha: `try? await Task.sleep` połykał `CancellationError`
+  i spadał do `flush()`, więc każde `timer.cancel()` (wyłączenie zbierania, tło, drugie `configure`)
+  wysyłało paczkę i ścigało się z następnym jawnym flushem — to była przyczyna flaky
+  `testDisablingAnalyticsWipesEventsButCanBeEnabledAgain`. Zabetonowane
+  `testCancellingTheFlushTimerDoesNotFlush` (0.3.2)
 - [x] `202` ack; `400` z `details[].path=events.<i>` usuwa tylko wskazane eventy; `400` bez ścieżek / `privacy_violation` odrzuca paczkę; `401` zatrzymuje SDK na ten launch; `403`/`429` pauza z `Retry-After`; `413` dzieli paczkę; 5xx/sieć → backoff do 5 min
 - [x] `202` niesie `rejected` — ingest ma **zdalny kill switch po nazwie eventu** (`blockedEvents`), więc paczka
   potwierdzona nie znaczy „wszystko weszło". Eventu nie ponawiamy (to decyzja projektu, nie awaria), ale liczba
@@ -201,7 +210,7 @@ kto odinstalował, nigdy.
 | `optOut()` | kasuje też katalog crashów, nie tylko kolejkę eventów | [x] |
 | Domyślnie | **włączone** (`Options.crashReporting = true`), po obu stronach: serwerowa bramka `crash_reporting_enabled` też jest domyślnie włączona (migracja 0056 w repo `Union`). Wyłączenie po stronie projektu **nie** zatrzymuje uploadu — zamienia go w zapisaną odmowę (`collection_disabled`), więc nic nie ginie po cichu | [x] |
 | Weryfikacja end-to-end | `Scripts/crash-e2e.sh` — proces **naprawdę** umiera na SIGSEGV, drugi proces znajduje rekord na dysku i wysyła go gzipem do lokalnego udawanego `/v1/crash`. To jedyny szew, którego `swift test` nie umie dotknąć: runner, który dostaje SIGSEGV, nie raportuje nic, więc `CrashTests` idzie przez `union_crash_capture_live`. Skrypt sprawdza też, że nieudany upload **zostawia** plik. Uruchamiać przed releasem i po każdej zmianie w `Sources/UnionCrashCore` lub `Sources/Union/Crash` | [x] |
-| Symbolikacja | **żadnej.** Offsety to tożsamość, symbole to wyświetlanie: panel podaje gotową komendę `atos` per obraz. Upload dSYM jest poza zakresem i nie przegrupuje historii, gdy powstanie | — |
+| Symbolikacja | **nie w SDK.** Offsety to tożsamość, symbole to wyświetlanie: panel podaje gotową komendę `atos` per obraz. Nazwy funkcji daje upload dSYM **z CI klienta** (skrypt `https://useunion.dev/dsyms/v1.sh`, przypięty SHA-256, klucz serwerowy `UNION_SERVER_KEY` → `POST /v1/symbols`), nie z aplikacji — SDK nie ma w tym udziału i nie wolno mu tego dodać (klucz serwerowy nie może leżeć w buildzie). Upload nazywa ramki i **nigdy nie przegrupowuje** historii | — |
 
 Reguły, których nie łamiemy:
 - **Trzy zegary są rozdzielne.** `crashed_at` (atrybucja dnia), `sent_at` (opóźnienie uploadu),

@@ -27,7 +27,8 @@ actor EventPipeline {
     private var stopped = false
     private var pausedUntil: Date?
     private var attempt = 0
-    private var flushing = false
+    /// The drain in progress, if any. A second `flush()` awaits it instead of returning — see `flush`.
+    private var inFlight: Task<Void, Never>?
     private var timer: Task<Void, Never>?
     private(set) var optedOut = false
     private var analyticsCollectionEnabled: Bool
@@ -326,12 +327,32 @@ actor EventPipeline {
 
     // MARK: - Flush
 
+    /// Sends everything queued when it was called, unless the server or the network refuses.
+    ///
+    /// A call made while another drain is in flight **waits for it and then drains what is left**.
+    /// It used to return at once (`guard !flushing`), and actor reentrancy made that observable: the
+    /// automatic flush that `start()` schedules is suspended in `transport.send` when the app's own
+    /// `await Union.flush()` arrives, so the call came back before the events queued ahead of it had
+    /// left — a promise `flush` never kept for exactly the case someone calls it (before a test
+    /// asserts, before the app is suspended). The loop re-checks `inFlight` because another caller
+    /// can start a drain while this one is waiting.
     func flush() async {
         ensurePrepared()
-        guard !flushing, !stopped, !optedOut, analyticsCollectionEnabled else { return }
+        while let running = inFlight { await running.value }
+        guard !stopped, !optedOut, analyticsCollectionEnabled, !queue.isEmpty else { return }
         if let until = pausedUntil, until > clock.now { return }
-        flushing = true
-        defer { flushing = false }
+        // Cleared inside the task (actor-isolated, like this method), so by the time any waiter
+        // resumes from `value` the slot is already empty — clearing it after `await` here would race
+        // the waiters for who runs first.
+        let task = Task {
+            await self.drain()
+            self.inFlight = nil
+        }
+        inFlight = task
+        await task.value
+    }
+
+    private func drain() async {
         var maxEvents = Limits.batchMaxEvents
         while !queue.isEmpty {
             let batch = Batcher.nextBatch(from: queue, maxEvents: maxEvents)
@@ -444,7 +465,10 @@ actor EventPipeline {
         let interval = config.flushInterval
         timer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                // `Task.sleep` throws on cancellation, and the `try?` this used to be swallowed it and
+                // fell through to `flush()` — so cancelling the timer (collection turned off, going to
+                // background, a second `configure`) *fired* it once, racing whatever came next.
+                do { try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000)) } catch { return }
                 guard let self else { return }
                 await self.flush()
             }

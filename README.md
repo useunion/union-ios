@@ -4,7 +4,13 @@ Product analytics and crash reporting for iOS apps: live sessions, screens, feat
 
 ## Install
 
-Xcode → File → Add Package Dependencies → this repository URL. Add the `Union` library to your app target.
+Xcode → File → Add Package Dependencies → `https://github.com/useunion/union-ios`, **Up to Next Major Version** from `0.3.2`. Add the `Union` library to your app target. With a `Package.swift`:
+
+```swift
+.package(url: "https://github.com/useunion/union-ios", from: "0.3.2")
+```
+
+**Integrating with a coding agent** (Claude Code, Cursor, Codex)? Copy the setup prompt from the Union panel — **Settings → SDK setup** — which is filled in with your project's write key, privacy mode and connected integrations, and carries the rules the server enforces (feature roles, naming, purchase linking). A generic version is at [useunion.dev/llms.txt](https://useunion.dev/llms.txt).
 
 ## 10-minute setup
 
@@ -152,7 +158,7 @@ Neither mode uses IDFA or requires ATT. IP addresses are truncated server-side b
 
 ## Delivery guarantees
 
-Events are persisted to an NDJSON queue in Application Support (excluded from backup) and sent in batches (≤100 events / ≤256 KB) every 10 s, at 20 queued events, when the app goes to background, and on `flush()`. Retries keep the same `event_id`, so the server deduplicates. Server responses: partial `400` drops only the rejected events; `401` stops the SDK for this launch; `403` / `429` pause (respecting `Retry-After`); network errors back off exponentially (max 5 min). Sessions end after 30 minutes of inactivity — the same rule the server applies.
+Events are persisted to an NDJSON queue in Application Support (excluded from backup) and sent in batches (≤100 events / ≤256 KB) every 10 s, at 20 queued events, when the app goes to background, and on `flush()`. `await Union.flush()` returns once everything queued before the call has been sent (or the server or network refused it) — a call made during an automatic flush waits for it rather than returning early. Retries keep the same `event_id`, so the server deduplicates. Server responses: partial `400` drops only the rejected events; `401` stops the SDK for this launch; `403` / `429` pause (respecting `Retry-After`); network errors back off exponentially (max 5 min). Sessions end after 30 minutes of inactivity — the same rule the server applies.
 
 ## Privacy manifest
 
