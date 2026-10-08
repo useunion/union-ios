@@ -210,6 +210,36 @@ final class PipelineTests: XCTestCase {
         XCTAssertNil(session)
     }
 
+    // Regression: a launch that started paused used to wipe the Keychain, so the `true` that the
+    // app sent once its consent store opened minted a new install id — one device per launch.
+    func testStartingPausedKeepsTheStoredInstallIdWhenConsentIsRestored() async {
+        let transport = StubTransport()
+        let stored = InMemoryIdentityStore()
+        stored.save(Identity(installId: "0190a000-0000-7000-8000-000000000001", userId: "u1"))
+        let p = Fixtures.pipeline(transport: transport, analyticsCollectionEnabled: false, identity: stored)
+
+        await p.start()
+        await p.setAnalyticsCollectionEnabled(true)
+        await p.track(name: "after_restore", properties: [:], role: nil, screen: nil)
+        await p.flush()
+
+        XCTAssertEqual(stored.load().installId, "0190a000-0000-7000-8000-000000000001")
+        XCTAssertEqual(transport.sent.first?.identity.installId, "0190a000-0000-7000-8000-000000000001")
+        XCTAssertTrue(transport.sent.first?.events.contains { $0.name == "after_restore" } ?? false)
+    }
+
+    func testStartingPausedAndRestoringFalseWithdrawsAndWipes() async {
+        let stored = InMemoryIdentityStore()
+        stored.save(Identity(installId: "0190a000-0000-7000-8000-000000000001", userId: "u1"))
+        let p = Fixtures.pipeline(analyticsCollectionEnabled: false, identity: stored)
+
+        await p.start()
+        await p.setAnalyticsCollectionEnabled(false)
+
+        XCTAssertNil(stored.load().installId)
+        XCTAssertNil(stored.load().userId)
+    }
+
     func testDisablingAnalyticsWipesEventsButCanBeEnabledAgain() async {
         let transport = StubTransport()
         let p = Fixtures.pipeline(transport: transport)

@@ -60,6 +60,10 @@ public struct Options: Sendable {
     /// Set this to `false` when consent lives behind app-owned storage that is not available at
     /// launch. Crash and hang reporting remains active and can cover that launch window; call
     /// `Union.setAnalyticsCollectionEnabled(true)` after consent has been restored.
+    ///
+    /// `false` here means "not known yet": nothing stored on the device is read or deleted until the
+    /// app answers. `true` resumes the same install id; `false` withdraws and wipes, as it does at
+    /// any other time.
     public var analyticsCollectionEnabled: Bool = true
     /// Ingest endpoint. Defaults to the hosted Union ingest.
     public var endpoint: URL = URL(string: "https://in.useunion.dev/v1/batch")!

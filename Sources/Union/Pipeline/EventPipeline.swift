@@ -32,6 +32,8 @@ actor EventPipeline {
     private var timer: Task<Void, Never>?
     private(set) var optedOut = false
     private var analyticsCollectionEnabled: Bool
+    /// Started with collection off and the app has not answered yet — see `ensurePrepared`.
+    private var consentPending = false
     /// Set by `Client` right after construction. Optional because crash reporting can be off, and
     /// because every crash call from here has to be a no-op then rather than a branch at each site.
     private var crash: CrashReporter?
@@ -85,11 +87,13 @@ actor EventPipeline {
             identity = identityStore.ensure(now: clock.now)
             queue = (try? store.load()) ?? []
         } else {
-            // Consent is authoritative at startup. Do not even materialize the product identity,
-            // and discard anything a previous run may have left queued before consent changed.
-            identityStore.wipe()
-            session.clear()
-            try? store.replaceAll([])
+            // Starting disabled means "consent is not known yet", not "consent was withdrawn": the
+            // documented use is an app whose consent lives in storage that opens after launch. So
+            // nothing is read, minted or deleted here — the app's answer decides that in
+            // `setAnalyticsCollectionEnabled`. This used to wipe the Keychain on every such launch,
+            // and the `true` that followed a moment later minted a new install id, so one phone
+            // read as a new device per launch.
+            consentPending = true
             identity = .anonymous
             queue = []
         }
@@ -273,6 +277,21 @@ actor EventPipeline {
     /// Unlike `optOut()`, crash reports and the process-wide crash handlers remain intact.
     func setAnalyticsCollectionEnabled(_ enabled: Bool) {
         ensurePrepared()
+        if consentPending {
+            // The first answer after a launch that started paused. `true` resumes what the device
+            // already has — install id, queue, session; `false` is a withdrawal like any other, and
+            // takes the same destructive branch below even though the flag is already false.
+            consentPending = false
+            if enabled {
+                analyticsCollectionEnabled = true
+                guard !optedOut else { return }
+                identity = identityStore.ensure(now: clock.now)
+                queue = (try? store.load()) ?? []
+                start()
+                return
+            }
+            analyticsCollectionEnabled = true
+        }
         guard analyticsCollectionEnabled != enabled else { return }
         analyticsCollectionEnabled = enabled
 
