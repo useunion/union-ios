@@ -55,16 +55,20 @@ public enum PropertyValue: Sendable, Equatable, Codable, ExpressibleByStringLite
 }
 
 public struct Options: Sendable {
-    /// Whether product analytics starts collecting as soon as the SDK is configured.
+    /// Leave this at `true`. Every Union app starts collecting at `configure`.
     ///
-    /// Set this to `false` when consent lives behind app-owned storage that is not available at
-    /// launch. Crash and hang reporting remains active and can cover that launch window; call
-    /// `Union.setAnalyticsCollectionEnabled(true)` after consent has been restored.
-    ///
-    /// `false` here means "not known yet": nothing stored on the device is read or deleted until the
-    /// app answers. `true` resumes the same install id; `false` withdraws and wipes, as it does at
-    /// any other time.
-    public var analyticsCollectionEnabled: Bool = true
+    /// Starting paused was meant for apps whose consent store opens after launch, and in SDK ≤ 0.3.2
+    /// it minted a new install id on every such launch — one phone read as a new device per session.
+    /// An app that needs to honour a stored "no" calls `Union.optOut()` (it persists across launches)
+    /// or `Union.setAnalyticsCollectionEnabled(false)` once it knows. Removal follows in a later
+    /// release; until then `false` still means "consent not known yet" and touches nothing stored.
+    @available(*, deprecated, message: "Leave collection on at configure; use Union.optOut() or setAnalyticsCollectionEnabled(false) to honour a stored refusal.")
+    public var analyticsCollectionEnabled: Bool {
+        get { startsCollecting }
+        set { startsCollecting = newValue }
+    }
+    /// Storage for the deprecated `analyticsCollectionEnabled`, read by `Client` without a warning.
+    var startsCollecting: Bool = true
     /// Ingest endpoint. Defaults to the hosted Union ingest.
     public var endpoint: URL = URL(string: "https://in.useunion.dev/v1/batch")!
     /// Overrides automatic detection (DEBUG → development, sandbox receipt → testflight, else production).
