@@ -129,6 +129,11 @@ Reguły, których nie łamiemy:
   „to jest PII i deklarujemy je w App Privacy" podejmuje aplikacja, nie SDK. Serwer scala tak samo
   (`json_patch`) i kasuje traits, gdy retencja usunie ostatnią sesję instalacji.
 - [x] `optOut()` czyści kolejkę, tożsamość i sesję; `optIn()` przywraca zbieranie
+- [x] start z `analyticsCollectionEnabled = false` **nie kasuje** Keychaina: znaczy „zgoda jeszcze nieznana",
+  a dopiero odpowiedź aplikacji (`true` wznawia ten sam `install_id`, `false` kasuje) rozstrzyga. Do 0.3.2
+  każdy taki start mintował nowe id, więc jeden telefon był w panelu nowym urządzeniem per sesja (Boardly).
+  Opcja jest od 0.3.3 `deprecated` — zbieranie startuje zawsze w `configure`, odmowę niesie `optOut()`.
+  Zabetonowane `testStartingPausedKeepsTheStoredInstallIdWhenConsentIsRestored` (0.3.3)
 - [x] `PrivacyInfo.xcprivacy` w paczce (Product Interaction, Device ID, User ID, Other Diagnostic Data; `CA92.1`)
 - [ ] `requestDataDeletion()` to dziś alias `optOut()` — zamienić na realne żądanie, gdy API je wystawi
 - [x] `Union.installId` wystawia install id do odczytu (`nil` przed `configure` i w `strictAnonymous`),

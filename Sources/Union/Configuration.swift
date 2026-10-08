@@ -122,6 +122,6 @@ enum SDKInfo {
     /// every batch, so it is the only way to tell a build that *can* send crashes from one that
     /// cannot. Without it, "this build reports no crashes" and "this build has no crash handler" are
     /// the same sentence in the panel.
-    static let version = "0.3.2"
+    static let version = "0.3.3"
     static let contractVersion = 1
 }

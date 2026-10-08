@@ -4,10 +4,10 @@ Product analytics and crash reporting for iOS apps: live sessions, screens, feat
 
 ## Install
 
-Xcode → File → Add Package Dependencies → `https://github.com/useunion/union-ios`, **Up to Next Major Version** from `0.3.2`. Add the `Union` library to your app target. With a `Package.swift`:
+Xcode → File → Add Package Dependencies → `https://github.com/useunion/union-ios`, **Up to Next Major Version** from `0.3.3`. Add the `Union` library to your app target. With a `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/useunion/union-ios", from: "0.3.2")
+.package(url: "https://github.com/useunion/union-ios", from: "0.3.3")
 ```
 
 **Integrating with a coding agent** (Claude Code, Cursor, Codex)? Copy the setup prompt from the Union panel — **Settings → SDK setup** — which is filled in with your project's write key, privacy mode and connected integrations, and carries the rules the server enforces (feature roles, naming, purchase linking). A generic version is at [useunion.dev/llms.txt](https://useunion.dev/llms.txt).
